@@ -1,0 +1,126 @@
+  [PASS] valid GLB 2 header/length
+  [PASS] serialized Human_ArcticSurvivor_PBR base texture references embedded image
+  [PASS] serialized Human_ArcticSurvivor_PBR normal texture references embedded image
+  [PASS] serialized Human_ArcticSurvivor_PBR orm texture references embedded image
+  [PASS] serialized Human_ArcticSurvivor_PBR ao texture references embedded image
+  [PASS] AO and metallic/roughness share packed ORM image (R/G/B glTF channels)
+  [PASS] base: finite, nonblack decoded pixels; range 0.0000..0.8392
+  [INFO] base channel standard deviations [0.1584327518939972, 0.1276426613330841, 0.11586803942918777] (not a quality score)
+  [PASS] normal: finite, nonblack decoded pixels; range 0.0157..1.0000
+  [INFO] normal channel standard deviations [0.0064528812654316425, 0.006110683549195528, 0.010579894296824932] (not a quality score)
+  [PASS] orm: finite, nonblack decoded pixels; range 0.0000..1.0000
+  [INFO] orm channel standard deviations [0.38994139432907104, 0.12647700309753418, 0.07618751376867294] (not a quality score)
+  [REVIEW] rear motion sample Human_Walk frame 31; inspect pack/strap/body intersections
+  [REVIEW] rear motion sample Human_Run frame 22; inspect pack/strap/body intersections
+  [REVIEW] rear motion sample Human_CrouchWalk frame 40; inspect pack/strap/body intersections
+  [REVIEW] rear motion sample Human_Gather frame 105; inspect pack/strap/body intersections
+  [REVIEW] rear motion sample Human_Throw frame 57; inspect pack/strap/body intersections
+  [REVIEW] rear motion sample Human_Death frame 78; inspect pack/strap/body intersections
+GLB Human_Animated.glb  64.0 MB
+  objects: [('Human', 'MESH'), ('HumanRig', 'ARMATURE')]
+  [PASS] mesh 'Human' (130742 verts in glTF, 117461 in Blender)
+  [PASS] armature 'HumanRig'
+  [PASS] no preview helpers (ground / props / camera / light) in the asset
+  [PASS] bone count 66 (contract 66, source 66)
+  [PASS] mesh skinned to the rig (66 vertex groups)
+  [PASS] <= 4 skin weights per vertex (glTF max 4; source max 4, 0 source vertices over 4)
+  [PASS] one material ['Human_ArcticSurvivor_PBR']
+  [PASS] textures Human_BaseColor, Human_ORM, Human_Normal: found ['Human_BaseColor', 'Human_Normal', 'Human_ORM'] -> wired {'base': 'Human_BaseColor', 'orm': 'Human_ORM', 'normal': 'Human_Normal'}
+  [PASS] height 1.820 m (target 1.78 +- 0.06); X width 1.44, Y depth 0.66 (A-pose)
+  [PASS] boot soles on z = 0 at rest (lowest point +0.1 mm)
+  [PASS] Human_Idle: 360 frames / 361 keys at 60 fps (expected 360, 6.00 s, loop)
+  [PASS] Human_Idle: no NaN / inf keys
+  [PASS] Human_Idle: loop closes (first vs last key: 0.000 deg, 0.00 mm)
+  [PASS] Human_Walk: 62 frames / 63 keys at 60 fps (expected 62, 1.03 s, loop, 1.30 m/s)
+  [PASS] Human_Walk: no NaN / inf keys
+  [PASS] Human_Walk: loop closes (first vs last key: 0.000 deg, 0.00 mm)
+  [PASS] Human_Run: 44 frames / 45 keys at 60 fps (expected 44, 0.73 s, loop, 4.50 m/s)
+  [PASS] Human_Run: no NaN / inf keys
+  [PASS] Human_Run: loop closes (first vs last key: 0.000 deg, 0.00 mm)
+  [PASS] Human_CrouchIdle: 300 frames / 301 keys at 60 fps (expected 300, 5.00 s, loop)
+  [PASS] Human_CrouchIdle: no NaN / inf keys
+  [PASS] Human_CrouchIdle: loop closes (first vs last key: 0.000 deg, 0.00 mm)
+  [PASS] Human_CrouchWalk: 80 frames / 81 keys at 60 fps (expected 80, 1.33 s, loop, 0.90 m/s)
+  [PASS] Human_CrouchWalk: no NaN / inf keys
+  [PASS] Human_CrouchWalk: loop closes (first vs last key: 0.000 deg, 0.00 mm)
+  [PASS] Human_Gather: 210 frames / 211 keys at 60 fps (expected 210, 3.50 s)
+  [PASS] Human_Gather: no NaN / inf keys
+  [PASS] Human_Attack: 78 frames / 79 keys at 60 fps (expected 78, 1.30 s)
+  [PASS] Human_Attack: no NaN / inf keys
+  [PASS] Human_Throw: 114 frames / 115 keys at 60 fps (expected 114, 1.90 s)
+  [PASS] Human_Throw: no NaN / inf keys
+  [PASS] Human_WarmHands: 240 frames / 241 keys at 60 fps (expected 240, 4.00 s, loop)
+  [PASS] Human_WarmHands: no NaN / inf keys
+  [PASS] Human_WarmHands: loop closes (first vs last key: 0.000 deg, 0.00 mm)
+  [PASS] Human_Hurt: 48 frames / 49 keys at 60 fps (expected 48, 0.80 s)
+  [PASS] Human_Hurt: no NaN / inf keys
+  [PASS] Human_Death: 156 frames / 157 keys at 60 fps (expected 156, 2.60 s)
+  [PASS] Human_Death: no NaN / inf keys
+  [PASS] Human_Gather starts / ends on the Human_Idle frame-0 pose (0.000 / 0.000 deg, 0.00 / 0.00 mm)
+  [PASS] Human_Attack starts / ends on the Human_Idle frame-0 pose (0.000 / 0.000 deg, 0.00 / 0.00 mm; right-hand tool grip held at both ends by design (fingers 73 deg from idle))
+  [PASS] Human_Throw starts / ends on the Human_Idle frame-0 pose (0.000 / 0.000 deg, 0.00 / 0.00 mm; right-hand tool grip held at the start by design (fingers 73 deg from idle))
+  [PASS] Human_Hurt starts / ends on the Human_Idle frame-0 pose (0.000 / 0.000 deg, 0.00 / 0.00 mm)
+  [PASS] Human_Death final pose differs from idle (102 deg); lying/still requires visual review
+  contacts (planted = sole point within 5 mm of its idle height; slip relative to the ground; idle frame-0 lowest vertex +0.2 mm):
+    clip                slip max  slip mean  planted    lowest  worst contact
+    Human_Idle            0.07mm    0.002mm     1864    -0.0mm  heel R
+    Human_Walk            0.35mm    0.014mm      144     0.1mm  heel R
+    Human_Run             0.08mm    0.018mm       28     0.2mm  heel R
+    Human_CrouchIdle      0.00mm    0.000mm     1500    -0.3mm  toe tip L
+    Human_CrouchWalk      0.33mm    0.010mm      238     0.1mm  heel L
+    Human_Gather          1.14mm    0.007mm      886    -1.7mm  heel L
+    Human_Attack          0.37mm    0.006mm      421    -0.5mm  heel L
+    Human_Throw           1.08mm    0.033mm      497    -2.3mm  toe tip R
+    Human_WarmHands       0.15mm    0.006mm     1248    -0.2mm  heel R
+    Human_Hurt            0.40mm    0.005mm      272    -0.1mm  heel L
+    Human_Death           0.10mm    0.001mm      204     0.2mm  heel R
+  [PASS] Human_Idle: planted feet do not slide (max 0.07 mm/frame = 0.4 cm/s)
+  [PASS] Human_Idle: no ground penetration (lowest vertex -0.0 mm)
+  [PASS] Human_Walk: planted feet do not slide (max 0.35 mm/frame = 2.1 cm/s)
+  [PASS] Human_Walk: no ground penetration (lowest vertex +0.1 mm)
+  [PASS] Human_Run: planted feet do not slide (max 0.08 mm/frame = 0.5 cm/s)
+  [PASS] Human_Run: no ground penetration (lowest vertex +0.2 mm)
+  [PASS] Human_CrouchIdle: planted feet do not slide (max 0.00 mm/frame = 0.0 cm/s)
+  [PASS] Human_CrouchIdle: no ground penetration (lowest vertex -0.3 mm)
+  [PASS] Human_CrouchWalk: planted feet do not slide (max 0.33 mm/frame = 2.0 cm/s)
+  [PASS] Human_CrouchWalk: no ground penetration (lowest vertex +0.1 mm)
+  [PASS] Human_Gather: planted feet do not slide (max 1.14 mm/frame = 6.8 cm/s)
+  [PASS] Human_Gather: no ground penetration (lowest vertex -1.7 mm)
+  [PASS] Human_Attack: planted feet do not slide (max 0.37 mm/frame = 2.2 cm/s)
+  [PASS] Human_Attack: no ground penetration (lowest vertex -0.5 mm)
+  [PASS] Human_Throw: planted feet do not slide (max 1.08 mm/frame = 6.5 cm/s)
+  [PASS] Human_Throw: no ground penetration (lowest vertex -2.3 mm)
+  [PASS] Human_WarmHands: planted feet do not slide (max 0.15 mm/frame = 0.9 cm/s)
+  [PASS] Human_WarmHands: no ground penetration (lowest vertex -0.2 mm)
+  [PASS] Human_Hurt: planted feet do not slide (max 0.40 mm/frame = 2.4 cm/s)
+  [PASS] Human_Hurt: no ground penetration (lowest vertex -0.1 mm)
+  [PASS] Human_Death: planted feet do not slide (max 0.10 mm/frame = 0.6 cm/s)
+  [PASS] Human_Death: no ground penetration (lowest vertex +0.2 mm)
+
+comparison (imported the same way; dims = X x Y x Z of the rest mesh):
+             GLB MB   verts    tris  area m2  tri/m2  UV sum  tex px   px/m bones clips   sec  dims m
+  Human        64.0  130742  231508     6.63   34912    1.07    4096   1643    66    11  28.2  1.44 x 0.66 x 1.82
+  ArcticFox    21.8   24538   31149     0.69   45408    1.20    2048   2707    34     8  13.9  0.21 x 0.95 x 0.45
+  Penguin      18.0   39582   70024     0.13  547391    0.84    2048   5263    18     9  19.6  0.14 x 0.15 x 0.32
+  Orca         43.7   42352   80600    21.44    3760    1.47    4096   1072    20     8  26.3  2.05 x 6.09 x 2.53
+  texture maps (1024 px statistics):
+  Human      base 4096x4096: lum 0.28+-0.13 detail 2.54 sat 0.09 | normal 4096x4096: strength 0.011 p95 0.028 detail 1.49 | ORM 4096x4096: AO 0.45 (2% 0.00) rough 0.71+-0.13
+             actions: Human_Attack 78f, Human_CrouchIdle 300f, Human_CrouchWalk 80f, Human_Death 156f, Human_Gather 210f, Human_Hurt 48f, Human_Idle 360f, Human_Run 44f, Human_Throw 114f, Human_Walk 62f, Human_WarmHands 240f
+  ArcticFox  base 2048x2048: lum 0.65+-0.33 detail 9.28 sat 0.11 | normal 2048x2048: strength 0.096 p95 0.256 detail 8.31 | ORM 2048x2048: AO 0.86 (2% 0.63) rough 0.76+-0.22
+             actions: ArcticFox_Dig 48f, ArcticFox_Gallop 22f, ArcticFox_Idle 180f, ArcticFox_LieDown 144f, ArcticFox_Pounce 116f, ArcticFox_Sniff 240f, ArcticFox_Trot 32f, ArcticFox_Walk 52f
+  Penguin    base 2048x2048: lum 0.27+-0.29 detail 3.16 sat 0.06 | normal 2048x2048: strength 0.074 p95 0.227 detail 12.28 | ORM 2048x2048: AO 0.85 (2% 0.35) rough 0.55+-0.16
+             actions: Penguin_Call 300f, Penguin_Death 180f, Penguin_Hop 90f, Penguin_Idle 240f, Penguin_Peck 180f, Penguin_Run 28f, Penguin_Slide 48f, Penguin_Swim 60f, Penguin_Walk 48f
+  Orca       base 4096x4096: lum 0.32+-0.29 detail 1.24 sat 0.03 | normal 4096x4096: strength 0.024 p95 0.082 detail 3.39 | ORM 4096x4096: AO 0.82 (2% 0.35) rough 0.25+-0.10
+             actions: Orca_Bite 120f, Orca_Breach 240f, Orca_Idle 240f, Orca_Surface 330f, Orca_Swim 180f, Orca_SwimFast 108f, Orca_TurnL 180f, Orca_TurnR 180f
+
+VISUAL QUALITY: UNDETERMINED by automated metrics; review the rendered sheets.
+  File size, triangle count, map variance, normal strength, bones and clip duration are descriptive only.
+  UV area is the sum of triangle areas, including overlaps; it is NOT atlas occupancy.
+  Derived texel density is nominal only; UV overlap and local distortion were not measured.
+  Contact checks use inferred sole points and sampled mesh frames, not measured physical contacts.
+  Review silhouette, facial anatomy, material readability, seams and deformation in motion against the fox.
+  Rear three-quarter: review backpack fit, shoulder straps, hip belt and bedroll silhouette.
+  Pack/arm/coat intersections in animation are NOT automatically tested; rest views cannot establish clearance.
+  Technical failures: 0. Passing checks does not establish matching/surpassing the fox.
+
+sheets in C:\Users\leosp\Documents\Blender\Artic-Survival\human_thumb_qa\export: look_fox_vs_human.png (rows side / 3-4 / head / rear 3-4; fox left, human right), textures_fox_vs_human.png (BaseColor / Normal / ORM; fox top, human bottom; grey = missing)

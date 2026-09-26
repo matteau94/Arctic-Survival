@@ -1,0 +1,20 @@
+{
+  "bones": 66,
+  "vertices_changed": 590,
+  "uv_weights_unchanged": true,
+  "rest_of_body_unchanged": true,
+  "old_segments_m": [
+    0.042,
+    0.033,
+    0.028
+  ],
+  "new_segments_m": [
+    0.027,
+    0.025,
+    0.019
+  ],
+  "chain_reduction_percent": 31.06796116504854,
+  "requires_action_regeneration": true,
+  "old_chain_m": 0.10300000608432687,
+  "new_chain_m": 0.07100004144012928
+}

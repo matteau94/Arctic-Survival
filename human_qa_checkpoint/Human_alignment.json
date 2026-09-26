@@ -1,0 +1,101 @@
+{
+  "source": "Human skeleton.glb",
+  "sha256": "5f7269adc78290bd56101333725c9c7549ea390a16e98f372f9fcbef997a3a26",
+  "original_height_m": 0.2615017890930176,
+  "uniform_scale": 6.8450775146484375,
+  "alignment": "Z-up retained; facing -Y retained; floor to z=0; X bbox midpoint centered; skull crown z=1.790m. Arms remain in source relaxed pose, not retargeted.",
+  "matrix": [
+    [
+      6.8450775146484375,
+      0.0,
+      0.0,
+      0.001088425051420927
+    ],
+    [
+      0.0,
+      6.8450775146484375,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      6.8450775146484375,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "skull_slice_guides": [
+    {
+      "z": 1.54,
+      "skull_half_width": 0.03705640747636502,
+      "old_skin_half_width": 0.057,
+      "new_skin_half_width": 0.051300000000000005
+    },
+    {
+      "z": 1.548,
+      "skull_half_width": 0.03350623812613769,
+      "old_skin_half_width": 0.06,
+      "new_skin_half_width": 0.054
+    },
+    {
+      "z": 1.556,
+      "skull_half_width": 0.029975532627110866,
+      "old_skin_half_width": 0.062,
+      "new_skin_half_width": 0.0558
+    },
+    {
+      "z": 1.578,
+      "skull_half_width": 0.03762734617658108,
+      "old_skin_half_width": 0.063,
+      "new_skin_half_width": 0.0567
+    },
+    {
+      "z": 1.6,
+      "skull_half_width": 0.04417204044360601,
+      "old_skin_half_width": 0.065,
+      "new_skin_half_width": 0.0585
+    },
+    {
+      "z": 1.62,
+      "skull_half_width": 0.045035907214931115,
+      "old_skin_half_width": 0.069,
+      "new_skin_half_width": 0.06210000000000001
+    },
+    {
+      "z": 1.645,
+      "skull_half_width": 0.059557275162134785,
+      "old_skin_half_width": 0.072,
+      "new_skin_half_width": 0.07038931879053369
+    },
+    {
+      "z": 1.667,
+      "skull_half_width": 0.0664752822083615,
+      "old_skin_half_width": 0.074,
+      "new_skin_half_width": 0.07361882055209037
+    },
+    {
+      "z": 1.69,
+      "skull_half_width": 0.06798053769037132,
+      "old_skin_half_width": 0.0755,
+      "new_skin_half_width": 0.07512013442259283
+    },
+    {
+      "z": 1.702,
+      "skull_half_width": 0.06907047396024843,
+      "old_skin_half_width": 0.0765,
+      "new_skin_half_width": 0.07614261849006211
+    },
+    {
+      "z": 1.725,
+      "skull_half_width": 0.0697051891237546,
+      "old_skin_half_width": 0.077,
+      "new_skin_half_width": 0.07570518912375461
+    }
+  ]
+}
