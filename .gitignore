@@ -15,3 +15,9 @@ desktop.ini
 # Profiler dumps
 *.out
 *.prof
+
+# Website build output and local tooling
+dist/
+node_modules/
+.vercel/
+viewer/*.log

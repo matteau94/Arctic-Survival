@@ -1,5 +1,7 @@
 # Local Arctic viewer
 
+For public Vercel hosting, see [the deployment guide](../README.md).
+
 Open http://127.0.0.1:8765 while the Node server is running.
 
 To restart from the project directory: `node viewer/server.cjs`.
