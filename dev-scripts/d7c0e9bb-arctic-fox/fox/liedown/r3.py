@@ -1,0 +1,6 @@
+P = dict(tail_sit=[-9,-19,-24,-24,-22,-20], tail_lie=[24,6,0,-1,-1,0])
+exec(open(r"C:/Users/leosp/AppData/Local/Temp/claude/C--Users-leosp-Documents-Blender-Artic-Survival/d7c0e9bb-db31-445d-9968-dc877601a0b7/scratchpad/fox/liedown/ld.py").read())
+bake(NAME, N, pose)
+check([10, 20, 27, 35, 45, 55, 62, 72])
+sheet([NAME], view="side", count=8, path=OUT+"s_side.png")
+sheet([NAME], view="side", frames=[27, 50, 72], path=OUT+"s_big.png")
