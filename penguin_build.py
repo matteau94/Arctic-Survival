@@ -2,7 +2,7 @@
 
     blender -b --python penguin_build.py        (writes Penguin_Rigged.blend + textures/Penguin_*.png)
 
-Real-world metres, standing on z = 0, facing -Y (so +X is its left side), ~1.0 m tall.
+Real-world metres, standing on z = 0, facing -Y (so +X is its left side), ~0.32 m tall after the uniform rig scale.
 
 1. Mesh 'Penguin' (one object, one material, like the fox / bear / fish), built from lofts:
      body     trunk + neck + head as one ring loft with its own cylindrical UV layout
@@ -44,6 +44,7 @@ TEX = os.path.join(_od, "textures") if _od else os.path.join(DIR, "textures")
 os.makedirs(TEX, exist_ok=True)
 RES = int(os.environ.get("PENG_RES", "2048"))
 BODY_U = 0.70                      # body UVs fill u in [0, BODY_U]; other parts pack beside it
+MODEL_SCALE = 0.32                 # 0.32 m-tall penguin next to the ~0.40 m Arctic fox
 
 BODY, BEAK_UP, BEAK_LO, FLIPPER, FOOT, EYE, TAIL, MOUTH = range(8)
 CLAW = FOOT + 0.5
@@ -310,7 +311,7 @@ EYE_R = 0.0092
 for s in (1, -1):
     d = V((s * math.sin(1.10), -math.cos(1.10), 0.06)).normalized()
     hit, nrm = surface(V((0, prof(0.884)[3], 0.884)) + d * 0.4, -d)
-    ctr = hit - nrm * EYE_R * 0.40
+    ctr = hit - nrm * EYE_R * 0.72
     eyes.append((blob("Eye", ctr, (EYE_R,) * 3, EYE, (20, 12)), ctr, nrm.copy()))
 
 # ======================================================================= 4. flippers
@@ -623,7 +624,7 @@ def noise_socket():
     """R: broad mottling, G: fine speckle (stretched along z), B: medium."""
     tc = nodes.new("ShaderNodeTexCoord")
     c = nodes.new("ShaderNodeCombineColor")
-    for k, (sc, stretch, det) in enumerate([(9.0, (1, 1, 1), 3.0), (260.0, (1, 1, 0.35), 2.0), (45.0, (1, 1, 0.6), 4.0)]):
+    for k, (sc, stretch, det) in enumerate([(9.0, (1, 1, 1), 3.0), (420.0, (1, 1, 0.35), 2.0), (45.0, (1, 1, 0.6), 4.0)]):
         vm = nodes.new("ShaderNodeVectorMath"); vm.operation = 'MULTIPLY'
         links.new(tc.outputs["Object"], vm.inputs[0]); vm.inputs[1].default_value = stretch
         nz = nodes.new("ShaderNodeTexNoise"); nz.inputs["Scale"].default_value = sc
@@ -794,7 +795,9 @@ is_body = (part == BODY)
 
 # ----------------------------------------------------------------------- feather fields
 Hb, RNDb, TIPb, EDGEb = feathers_ring(frac_b, perim_b, S_b, 0.0115, 0.0160, 0.0078, 0.0058, 0.0)   # back
-Hh, RNDh, TIPh, EDGEh = feathers_ring(frac_b, perim_b, S_b, 0.0036, 0.0068, 0.0025, 0.0030, 5.0)   # head velvet
+Hh, RNDh, TIPh, EDGEh = feathers_ring(frac_b, perim_b, S_b, 0.0019, 0.0042, 0.00135, 0.0019, 5.0, soft=1.6)   # fine directional down
+Hh = blur(Hh, is_body, 2)
+EDGEh = blur(EDGEh, is_body, 2)
 # belly: small dense downy feathers, two offset layers averaged and blurred -> soft plush
 Hs1, RNDs, _, EDGEs = feathers_ring(frac_b, perim_b, S_b, 0.0080, 0.0098, 0.0052, 0.0036, 11.0, soft=1.0)
 Hs2, RNDs2, _, _ = feathers_ring(frac_b, perim_b, S_b + 0.0017, 0.0062, 0.0080, 0.0041, 0.0029, 17.0, soft=1.0)
@@ -836,8 +839,8 @@ TIPd = TIPb * (1 - head_w) + TIPh * head_w
 EDGEd = EDGEb * (1 - head_w) + EDGEh * head_w
 dark = mix(SLATE, BLACK, hood)
 dark = mix(dark, SHEEN, (0.55 - 0.35 * hood) * TIPd * (0.5 + 0.5 * RNDd))   # glossy feather tips
-dark = dark * (0.80 + 0.35 * RNDd)[..., None] * (0.88 + 0.24 * n_broad)[..., None]
-dark = dark * (1 - (0.30 - 0.18 * head_w) * EDGEd)[..., None]
+dark = dark * (1.0 + (0.35 * (1.0 - 0.70 * head_w) * (RNDd - 0.5) * 2)[..., None]) * (0.88 + 0.24 * n_broad)[..., None]
+dark = dark * (1 - (0.25 - 0.20 * head_w) * EDGEd)[..., None]
 seam = smoothstep(tw + 0.02, tw + 0.08, theta + jit) * (1 - smoothstep(tw + 0.12, tw + 0.25, theta + jit))
 dark = mix(dark, BLACK, 0.6 * seam)
 
@@ -911,6 +914,18 @@ for ob_, ctr, nrm in eyes:
     near = dn < EYE_R * 1.5
     iris = mix(col(0.20, 0.09, 0.04), col(0.08, 0.035, 0.02), smoothstep(0.80, 0.93, cosang))
     iris = mix(iris, col(0.005, 0.005, 0.005), smoothstep(0.935, 0.95, cosang))
+    # Tiny painted catchlights give the dark eyes a readable focal point without
+    # adding geometry or changing the eye placement used by the rig.
+    tangent = rel / dn[..., None] - cosang[..., None] * np.array(nrm)
+    up = np.array((0.0, 0.0, 1.0))
+    up -= np.dot(up, nrm) * np.array(nrm)
+    up /= np.linalg.norm(up) + 1e-9
+    right = np.cross(up, np.array(nrm))
+    gx_eye = (tangent @ right) / EYE_R
+    gy_eye = (tangent @ up) / EYE_R
+    glint = np.exp(-((gx_eye + 0.28) / 0.13) ** 2 - ((gy_eye - 0.34) / 0.17) ** 2)
+    glint = np.clip(glint * smoothstep(0.88, 0.96, cosang), 0, 1)
+    iris = mix(iris, col(1.0, 0.92, 0.76), glint * 0.95)
     c_eye = np.where((near & (cosang > 0.55))[..., None], iris, c_eye)
 
 c_tail = SLATE * (0.75 + 0.4 * RNDb)[..., None] * (1 - 0.3 * EDGEb)[..., None]
@@ -938,7 +953,7 @@ rough = rough + (n_fine - 0.5) * 0.08
 
 # ----------------------------------------------------------------------- height -> normal map
 H = np.zeros_like(x)
-AMP_BACK, AMP_BELLY, AMP_HEAD = 0.0011, 0.0005, 0.00022
+AMP_BACK, AMP_BELLY, AMP_HEAD = 0.0011, 0.0005, 0.00009
 amp = np.where(white > 0.5, AMP_BELLY, AMP_BACK) * (1 - head_w) + AMP_HEAD * head_w
 belly_fluff = (n_fine - 0.5) * 0.00012
 H_belly = Hs * 0.00045 + belly_fluff
@@ -1014,6 +1029,7 @@ for nm_ in ("_pos", "_nrm", "_part", "_noise", "_ao"):
 # ======================================================================= 7. armature
 arm_data = bpy.data.armatures.new("PenguinRig")
 arm = bpy.data.objects.new("PenguinRig", arm_data)
+arm.scale = (MODEL_SCALE, MODEL_SCALE, MODEL_SCALE)
 scene.collection.objects.link(arm)
 bpy.context.view_layer.objects.active = arm
 bpy.ops.object.mode_set(mode='EDIT')

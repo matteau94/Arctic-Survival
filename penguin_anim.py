@@ -13,11 +13,11 @@ in-engine resets them; every clip except Death loops: last frame == first frame)
   Penguin_Walk    48 f  0.80 s  the waddle: body rocks over the stance foot and yaws the swing
                                 side forward, short shuffling steps, heel-peel foot roll, tail
                                 and flippers trailing with a phase lag.
-                                Planted feet travel back at 0.20 m/s (root speed to use).
+                                Planted feet travel back at 0.064 m/s in world space (root speed to use after 0.32 scale).
   Penguin_Run     28 f  0.47 s  hurried flight waddle: faster cadence (4.3 steps/s), longer
                                 steps with more foot lift, body pitched ~20 deg forward, big
                                 rock, flippers held out and back, head stabilised, tail up.
-                                Planted feet travel back at 0.60 m/s (root speed to use).
+                                Planted feet travel back at 0.192 m/s in world space (root speed to use after 0.32 scale).
   Penguin_Call   300 f  5.00 s  ecstatic display call: bows the beak onto the swelling chest,
                                 holds, draws breath, stretches up with the beak raised and open,
                                 calling in pulsed syllables (jaw ~24 deg), relaxes.
@@ -34,7 +34,7 @@ in-engine resets them; every clip except Death loops: last frame == first frame)
                                 topples onto its right side, head/flipper bounce, one last leg
                                 twitch, lies still from ~2.3 s to the end (hold the last frame).
 Legs on the ground are placed with an analytic two-bone IK (toe-pivot foot roll) so planted
-feet never slide; in Walk / Run they move back at exactly the documented root speed.
+feet never slide; in Walk / Run they move back at exactly the documented local root speed; exported world speeds include the 0.32 rig scale.
 """
 import bpy, math, os, sys
 from mathutils import Vector as V, Quaternion, Matrix
@@ -305,7 +305,7 @@ def idle():
 # ======================================================================= Walk
 def walk():
     name, C = "Penguin_Walk", 48
-    D = 0.16                  # metres travelled per cycle (2 steps) -> 0.2 m/s at 60 fps
+    D = 0.16                  # local metres/cycle -> 0.20 local, 0.064 world m/s at 60 fps
     STANCE = 0.62
     R = 0.5 * D * STANCE      # a planted foot runs from -R (front) to +R (back)
     LIFT = 0.028
@@ -439,7 +439,7 @@ def run():
     """Hurried flight waddle: same gait as the walk but faster, longer steps, the body pitched
     forward, big side-to-side rock and the flippers held out and back for balance."""
     name, C = "Penguin_Run", 28
-    D = 0.28                  # metres per cycle (2 steps) -> 0.60 m/s at 60 fps
+    D = 0.28                  # local metres/cycle -> 0.60 local, 0.192 world m/s at 60 fps
     STANCE = 0.52
     R = 0.5 * D * STANCE
     LIFT = 0.042
