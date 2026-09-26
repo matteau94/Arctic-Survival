@@ -144,14 +144,15 @@ def _build_terrain(mat):
     snow_rgh2 = _n(nt, 'ShaderNodeMath', (-450, 400), operation='SUBTRACT')
     L(snow_rgh.outputs[0], snow_rgh2.inputs[0]); L(sp.outputs[0], snow_rgh2.inputs[1])
 
-    # --- rock: dark grey-brown with strata-ish noise
+    # --- rock: sparse charcoal outcrops amid the snow
     n_rock = noise((-900, 100), 1 / 18.0, 8, 0.65)
     ramp_r = _n(nt, 'ShaderNodeValToRGB', (-650, 100))
-    ramp_r.color_ramp.elements[0].color = (0.055, 0.050, 0.045, 1)
-    ramp_r.color_ramp.elements[1].color = (0.17, 0.15, 0.13, 1)
+    ramp_r.color_ramp.elements[0].color = (0.018, 0.022, 0.027, 1)
+    ramp_r.color_ramp.elements[1].color = (0.105, 0.12, 0.135, 1)
     L(n_rock.outputs['Fac'], ramp_r.inputs[0])
 
-    # rock factor = max(rock mask, slope from normal) broken up by noise
+    # Rock masks are authored by the mountain, valley and coast fields. Limit their
+    # exposed area to a sparse 5–7.5% of eligible snow and break edges into outcrops.
     sepn = _n(nt, 'ShaderNodeSeparateXYZ', (-1200, -400))
     L(geo.outputs['Normal'], sepn.inputs[0])
     slope_f = _n(nt, 'ShaderNodeMapRange', (-1000, -400))
@@ -164,9 +165,23 @@ def _build_terrain(mat):
     L(n_break.outputs['Fac'], brk.inputs[0]); brk.inputs[1].default_value = 0.5
     radd = _n(nt, 'ShaderNodeMath', (-600, -400), operation='ADD')
     L(rmax.outputs[0], radd.inputs[0]); L(brk.outputs[0], radd.inputs[1])
-    rfac = _n(nt, 'ShaderNodeMapRange', (-420, -400))
-    rfac.inputs['From Min'].default_value = 0.35; rfac.inputs['From Max'].default_value = 0.65
-    L(radd.outputs[0], rfac.inputs['Value'])
+    # A deterministic 3-D noise threshold selects small clustered exposures. Feature
+    # masks localize candidates to ridges, valley walls and rocky coasts; steepness alone
+    # cannot expose broad plains. The high threshold keeps exposures to about 5–7.5% of
+    # eligible snow (the exact fraction depends on Blender's noise distribution).
+    exposure = _n(nt, 'ShaderNodeMapRange', (-420, -400))
+    exposure.clamp = True
+    exposure.inputs['From Min'].default_value = 0.925
+    exposure.inputs['From Max'].default_value = 0.99
+    exposure.inputs['To Min'].default_value = 0.0
+    exposure.inputs['To Max'].default_value = 1.0
+    L(n_break.outputs['Fac'], exposure.inputs['Value'])
+    sparse = _n(nt, 'ShaderNodeMath', (-200, -400), operation='MULTIPLY')
+    L(rmax.outputs[0], sparse.inputs[0]); L(exposure.outputs[0], sparse.inputs[1])
+    rfac = _n(nt, 'ShaderNodeMapRange', (0, -400))
+    rfac.clamp = True
+    rfac.inputs['From Min'].default_value = 0.0; rfac.inputs['From Max'].default_value = 0.8
+    L(sparse.outputs[0], rfac.inputs['Value'])
 
     # --- ice: blue glacial
     n_ice = noise((-900, -900), 1 / 30.0, 5)

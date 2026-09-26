@@ -131,12 +131,14 @@ def bones():
             L.append((nm, tuple(p), tuple(q), parent, tuple(pn), True, k > 0))
             p, parent = q, nm
 
-    p = W + dh * 0.022 + across * 0.022 + pn * 0.012
-    dirs = [_norm(dh * 0.55 + across * 0.65 + pn * 0.50)]
-    dirs.append(_norm(dirs[0] + pn * 0.25 + dh * 0.20))
-    dirs.append(_norm(dirs[1] + pn * 0.30))
+    # Compact gloved thumb: metacarpal sits inside the thenar mound;
+    # the exposed phalanges point along the hand with mild opposition.
+    p = W + dh * 0.033 + across * 0.022 + pn * 0.014
+    dirs = [_norm(dh * 0.82 + across * 0.50 + pn * 0.28)]
+    dirs.append(_norm(dirs[0] + pn * 0.12 + dh * 0.12))
+    dirs.append(_norm(dirs[1] + pn * 0.16))
     parent = "hand"
-    for k, (ln, dk) in enumerate(zip((0.042, 0.033, 0.028), dirs)):
+    for k, (ln, dk) in enumerate(zip((0.027, 0.025, 0.019), dirs)):
         q = p + dk * ln
         nm = f"thumb_0{k + 1}"
         L.append((nm, tuple(p), tuple(q), parent, tuple(pn), True, k > 0))

@@ -21,6 +21,6 @@ PLATEAU_HEIGHT = 2800.0                  # interior ice-sheet elevation (m)
 # Vertices per edge; the grid spacing is CHUNK_SIZE / (n - 1).
 LOD_RES = {0: 257, 1: 129, 2: 65}
 
-# Spawn point (a coastal-ish mountain area so the first view has everything). Streaming
-# modules may override; feature agents should make sure this area is interesting.
-SPAWN = (1_050_000.0, 420_000.0)
+# Coastal spawn near a fjord, chosen so the initial streamed window includes land, sea,
+# penguin habitat and coastal wildlife rather than only the interior ice sheet.
+SPAWN = (1_961_940.0, 752_276.0)

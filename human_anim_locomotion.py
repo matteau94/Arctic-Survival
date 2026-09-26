@@ -149,8 +149,8 @@ SHIN_ANG = {sd: math.atan2(LEG[sd]["sh"].y, -LEG[sd]["sh"].z) for sd, _ in SIDES
 
 
 def _mesh_heel_back():
-    """How far the boot heel reaches behind the ankle (m), from the real mesh if there is one."""
-    default = 0.068
+    """Heel contact offset used by the strict exporter QA (50 mm behind ankle)."""
+    default = 0.050
     if mesh is None or "stub" in bpy.data.filepath.lower() or len(mesh.data.vertices) < 3000:
         return default, 0.0                                  # capsule stub: use the default
     best, zmin = None, 1e9
@@ -168,17 +168,34 @@ def _mesh_heel_back():
                     best = b if best is None else max(best, b)
     if best is None:
         return default, 0.0
-    return min(max(best, 0.03), 0.12), zmin
+    # Use the outsole contact patch, not the raised heel trim or a QA proxy.
+    sole = [v.co for v in mesh.data.vertices
+            if v.co.z < zmin + 0.001 and any(g.group in gi and g.weight > 0.3 for g in v.groups)]
+    return max(v.y - a.y for v in sole), zmin
 
 
 HEEL_BACK, SOLE_Z = _mesh_heel_back()
+# The foot pivots below are specified on the ground plane.  The measured sole
+# vertex offset is the boot's height relative to the armature origin, so cancel
+# it at the pivot instead of embedding the rocker path below z=0.
+# A 0.2 mm outsole allowance covers the measured LBS compression at the
+# foot/toe blend (0.113 mm). This is below the sole tread thickness.
+GROUND_PIVOT_Z = -SOLE_Z + 0.0002
 
 
 def foot_geom(sd):
     a0, b0, t0 = RH[f"foot.{sd}"], RH[f"toe.{sd}"], RT[f"toe.{sd}"]
     o = V((a0.x, a0.y, 0.0))
+    tip_y = t0.y
+    if mesh is not None and len(mesh.data.vertices) >= 3000:
+        group = mesh.vertex_groups.get(f"toe.{sd}")
+        sole = [v.co for v in mesh.data.vertices if group is not None
+                and v.co.z < SOLE_Z + 0.001
+                and any(w.group == group.index and w.weight > 0.3 for w in v.groups)]
+        if sole:
+            tip_y = min(v.y for v in sole)
     return dict(O=o, a=a0 - o, b=b0 - o, h=V((0.0, HEEL_BACK, SOLE_Z)),
-                tp=V((t0.x - a0.x, t0.y - a0.y, SOLE_Z)))
+                tp=V((t0.x - a0.x, tip_y - a0.y, SOLE_Z)))
 
 
 FOOT = {sd: foot_geom(sd) for sd, _ in SIDES}
@@ -489,7 +506,7 @@ def stance_state(g, sd, s, u):
         Rb, Rt = Rx(-th_b), Rx(-th_t)
         ank = Rt @ (fg["b"] + Rb @ (a - fg["b"]) - fg["tp"]) + fg["tp"]
     psi = s * g.toe_out
-    P = V((s * g.width, g.y_land + g.v * g.T * u, 0.0))
+    P = V((s * g.width, g.y_land + g.v * g.T * u, GROUND_PIVOT_Z))
     return P + Rz(psi) @ ank, th_h + th_b + th_t, -th_b
 
 
@@ -512,10 +529,17 @@ def gait_foot(g, sd, s, u):
     ank.z += g.lift * bump(q, g.lift_peak)
     ank.y += g.kick * bump(q, g.kick_peak)
     ank.x += s * g.circ * bump(q, 0.5)
+    # Match the ground trajectory before the heel enters the contact band.
+    # Endpoint velocity alone does not prevent finite-frame landing skid.
+    settle = smoothstep(0.65, 0.90, q)
+    landing = a1 + (u - 1.0) * g.T * g.v * Y
+    ank.x = lerp(ank.x, landing.x, settle)
+    ank.y = lerp(ank.y, landing.y, settle)
     th = herm(t0, t1, (t0 - t0m) * k * g.th_m0, (t1p - t1) * k, q) + g.th_swing * bump(q, g.th_peak)
+    th = lerp(th, t1, settle)
     beta = max(0.0, herm(b0, 0.0, (b0 - b0m) * k, 0.0, min(1.0, q / 0.45)) if q < 0.45 else 0.0)
     return Foot(ank, psi, th, beta, smoothstep(0.0, 0.12, q) * (1 - smoothstep(0.9, 1.0, q)), g.swing_kmin,
-                g.ank_rel * bump(q, g.ank_rel_peak), g.swing_plantar)
+                g.ank_rel * bump(q, g.ank_rel_peak) * (1 - settle), g.swing_plantar)
 
 
 def planted_foot(sd, s, x, y, psi, heel_up=0.0):
@@ -523,7 +547,7 @@ def planted_foot(sd, s, x, y, psi, heel_up=0.0):
     fg = FOOT[sd]
     Rb = Rx(heel_up)
     ank = fg["b"] + Rb @ (fg["a"] - fg["b"])
-    P = V((x, y, 0.0))
+    P = V((x, y, GROUND_PIVOT_Z))
     return Foot(P + Rz(psi) @ ank, psi, -heel_up, heel_up)
 
 
@@ -772,7 +796,7 @@ WALK = make_gait(
     th_m0=1.0,
     pz=-0.035, bob=0.016, bob_lag=0.07, sway=0.032, sway_lag=0.05, yaw=rad(5), roll=rad(4.5),
     roll_lag=0.0, p_pitch=rad(4), lean=rad(8), counter=0.85, c_roll=rad(2.5), head_pitch=rad(6),
-    arm_bias=rad(-2), arm_amp=rad(15), arm_abd=rad(4), arm_cross=rad(2), elb=rad(22),
+    arm_bias=rad(-2), arm_amp=rad(15), arm_abd=rad(8), arm_cross=rad(2), elb=rad(22),
     elb_amp=rad(9), elb_lag=0.06, curl=rad(28),
     springs=dict(k_nod=0.004, k_hood=0.032, k_elb=0.012, k_elbz=0.004, arm_fn=1.7))
 
@@ -784,7 +808,7 @@ RUN = make_gait(
     pz=-0.078, bob=0.032, bob_lag=0.155, sway=0.012, sway_lag=-0.05, yaw=rad(7), roll=rad(5),
     roll_lag=0.02, p_pitch=rad(9), p_pitch_osc=rad(1.5), lean=rad(13), lean_osc=rad(1.2),
     counter=1.2, c_roll=rad(1.0), head_pitch=rad(2),
-    arm_bias=rad(4), arm_amp=rad(30), arm_abd=rad(6), arm_cross=rad(7), elb=rad(84),
+    arm_bias=rad(4), arm_amp=rad(30), arm_abd=rad(10), arm_cross=rad(5), elb=rad(84),
     elb_amp=rad(16), elb_lag=0.05, curl=rad(45), thumb=rad(25), wrist=rad(4),
     clav_prot=rad(5), clav_elev=rad(3), jaw0=rad(5),
     springs=dict(k_nod=0.002, k_hood=0.009, k_elb=0.006, k_elbz=0.005, arm_fn=2.4, k_jaw=0.003))

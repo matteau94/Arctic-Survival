@@ -57,16 +57,16 @@ BELT_ANISO = 4.0                # along-trend stretch of the belt noise
 CIRQUE_CELL = 4200.0
 CIRQUE_PROB = 0.65
 CIRQUE_DEPTH = 0.38             # fraction of local height removed at bowl floor
-CIRQUE_BAND = (0.14, 0.33)     # relative height band (h / range amp) where cirques bite
+CIRQUE_BAND = (0.10, 0.30)     # relative height band (h / range amp) where cirques bite
 # nunataks
 NUNATAK_CELL = 10000.0
 NUNATAK_PROB = 0.40
 NUNATAK_HEIGHT = (140.0, 750.0)
 NUNATAK_RADIUS = (1100.0, 3000.0)
 NUNATAK_ASPECT = 2.0            # max elongation; radius*aspect must stay < 0.7 cell (2x2 search)
-PEAK_GAIN = 2.0                 # overall scale so the highest crests reach ~range amplitude
+PEAK_GAIN = 1.45                # overall scale so the highest crests reach ~range amplitude
 MASSIF_BASE = 0.05              # massif height fraction where the ridged noise is 0
-MASSIF_POW = 1.9                # >1 sharpens peaks and broadens valleys
+MASSIF_POW = 1.6                # >1 sharpens peaks and broadens valleys
 NUNATAK_PLATEAU = 0.8           # max nunatak density on open plateau (fringes reach 1)
 
 KM = 1000.0

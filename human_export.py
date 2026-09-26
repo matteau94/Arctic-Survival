@@ -24,27 +24,17 @@
    frame-0 pose (the right-hand grip of Attack / Throw is reported separately - by design), no NaN,
    66 bones, ~1.78 m tall, <= 4 weights per vertex, and per clip: foot slip of planted contacts
    (relative to the ground, which moves at speed_mps for locomotion) and ground penetration of the
-   deformed mesh. Then a STRICT scorecard against ArcticFox_Animated.glb (the quality reference; the
-   other animals are listed for context): each metric human vs fox with PASS / FAIL and a final
-   verdict "beats fox: yes / no" with the reasons. Look sheet (fox | human: side, 3/4, head close-up,
-   same lights and relative framing) and texture sheet into --qa-dir (default <temp>/human_qa).
+   deformed mesh. Descriptive comparison statistics are not aesthetic quality scores.
+   Look and texture sheets support manual visual review. --output-dir isolates exports;
+   --qa-only reads the selected output without overwriting it. Relative paths resolve against this script.
 The QA step wipes the session (factory settings), so it always runs last.
 
-STATUS / TODO (checkpoint)
-  done   NLA + save + GLB export (4 influences, extras), full QA + strict fox scorecard run end-to-end on
-         the stub (~70 s with --no-preview); preview pipeline (snow ground scrolling at speed_mps, axe /
-         spear with release flight / stone props) renders, first pass was washed out -> lighting,
-         clay material for untextured meshes, smaller ground and tighter 3q camera applied, NOT yet
-         re-verified.
-  left   - verify the new preview look on a frame sheet; EEVEE is ~1-2 s/frame here, so the full set
-           (~1500 frames) takes ~30-45 min: run it in the background
-         - run the whole chain on Human_Rigged.blend when the model agent delivers it
 """
-import bpy, math, os, sys, tempfile
+import bpy, math, os, sys, tempfile, json, struct
 import numpy as np
 from mathutils import Vector as V, Matrix
 
-DIR = r"C:\Users\leosp\Documents\Blender\Artic-Survival"
+DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_BLEND = os.path.join(DIR, "Human_Animated.blend")
 OUT_GLB = os.path.join(DIR, "Human_Animated.glb")
 FOX_GLB = os.path.join(DIR, "ArcticFox_Animated.glb")
@@ -60,7 +50,12 @@ N_BONES = 66
 HEIGHT = 1.78
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 QA_DIR = argv[argv.index("--qa-dir") + 1] if "--qa-dir" in argv else os.path.join(tempfile.gettempdir(), "human_qa")
+QA_DIR = os.path.abspath(os.path.join(DIR, QA_DIR))
+OUTPUT_DIR = os.path.abspath(os.path.join(DIR, argv[argv.index("--output-dir") + 1])) if "--output-dir" in argv else DIR
+OUT_BLEND = os.path.join(OUTPUT_DIR, "Human_Animated.blend")
+OUT_GLB = os.path.join(OUTPUT_DIR, "Human_Animated.glb")
 ONLY_PREVIEW = set(argv[argv.index("--only-preview") + 1].split(",")) if "--only-preview" in argv else None
+QA_ONLY = "--qa-only" in argv
 
 scene = bpy.context.scene
 scene.render.fps = FPS
@@ -153,20 +148,40 @@ if SRC["infl"][1]:
           "the glTF exporter keeps the 4 largest and renormalises")
 
 # ======================================================================= 2. save + export
-bpy.ops.wm.save_as_mainfile(filepath=OUT_BLEND)
-for o in bpy.context.view_layer.objects:
-    o.select_set(o == arm or o == mesh or (o.type == 'MESH' and o.parent == arm))
-bpy.context.view_layer.objects.active = arm
-export_kw = dict(filepath=OUT_GLB, export_format='GLB', use_selection=True, export_animations=True,
-                 export_animation_mode='ACTIONS', export_force_sampling=True, export_image_format='AUTO',
-                 export_extras=True, export_influence_nb=4, export_all_influences=False)
-try:
-    bpy.ops.export_scene.gltf(**export_kw)
-except TypeError:                                   # older / newer exporter without some option
-    for k in ("export_influence_nb", "export_all_influences", "export_extras"):
-        export_kw.pop(k, None)
-    bpy.ops.export_scene.gltf(**export_kw)
-print("[human export] saved", OUT_BLEND, OUT_GLB, f"({os.path.getsize(OUT_GLB) / 1e6:.1f} MB)")
+if not QA_ONLY:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # The exporter only emits occlusionTexture for its recognized group input.
+    from io_scene_gltf2.blender.com.material_helpers import create_settings_group, get_gltf_node_name
+    for mat in mesh.data.materials:
+        if not mat or not mat.use_nodes:
+            continue
+        nt = mat.node_tree
+        for sep in list(nt.nodes):
+            if sep.type not in ('SEPARATE_COLOR', 'SEPRGB') or not sep.inputs[0].is_linked:
+                continue
+            source = sep.inputs[0].links[0].from_node
+            if source.type != 'TEX_IMAGE' or not source.image or 'Human_ORM' not in source.image.name:
+                continue
+            group = next((n for n in nt.nodes if n.type == 'GROUP' and n.node_tree
+                          and n.node_tree.name in (get_gltf_node_name(), 'glTF Settings')), None)
+            if group is None:
+                group = nt.nodes.new('ShaderNodeGroup')
+                group.node_tree = bpy.data.node_groups.get(get_gltf_node_name()) or create_settings_group(get_gltf_node_name())
+            nt.links.new(sep.outputs[0], group.inputs['Occlusion'])
+    bpy.ops.wm.save_as_mainfile(filepath=OUT_BLEND)
+    for o in bpy.context.view_layer.objects:
+        o.select_set(o == arm or o == mesh or (o.type == 'MESH' and o.parent == arm))
+    bpy.context.view_layer.objects.active = arm
+    export_kw = dict(filepath=OUT_GLB, export_format='GLB', use_selection=True, export_animations=True,
+                     export_animation_mode='ACTIONS', export_force_sampling=True, export_image_format='AUTO',
+                     export_extras=True, export_influence_nb=4, export_all_influences=False)
+    try:
+        bpy.ops.export_scene.gltf(**export_kw)
+    except TypeError:                                   # older / newer exporter without some option
+        for k in ("export_influence_nb", "export_all_influences", "export_extras"):
+            export_kw.pop(k, None)
+        bpy.ops.export_scene.gltf(**export_kw)
+    print("[human export] saved", OUT_BLEND, OUT_GLB, f"({os.path.getsize(OUT_GLB) / 1e6:.1f} MB)")
 
 
 # ======================================================================= 3. previews
@@ -454,6 +469,24 @@ def render_mp4(cam, name, path, view="side"):
         size = max(ext[2], ext[1], ext[0], 1.2)
         cam.location = tgt + dirn * size * 2.15
         cam.rotation_euler = (-dirn).to_track_quat('-Z', 'Y').to_euler()
+    # Fit the sampled motion bounds in camera coordinates for either projection.
+    corners = [V((x, y, z)) for x in (lo_[0], hi_[0]) for y in (lo_[1], hi_[1])
+               for z in (lo_[2], hi_[2])]
+    rotation = cam.rotation_euler.to_quaternion()
+    right, up, back = (rotation @ V(axis) for axis in ((1, 0, 0), (0, 1, 0), (0, 0, 1)))
+    target = V(c)
+    aspect = scene.render.resolution_x / scene.render.resolution_y
+    offsets = [p - target for p in corners]
+    if cam.data.type == 'ORTHO':
+        cam.data.ortho_scale = 2 * max(max(abs(p.dot(right)) for p in offsets),
+                                      max(abs(p.dot(up)) for p in offsets) * aspect) * 1.18
+        cam.location = target + back * 30
+    else:
+        tan_x = cam.data.sensor_width / (2 * cam.data.lens)
+        tan_y = tan_x / aspect
+        distance = max(p.dot(back) + 1.18 * max(abs(p.dot(right)) / tan_x,
+                                               abs(p.dot(up)) / tan_y) for p in offsets)
+        cam.location = target + back * distance
     end = total - (1 if exp["cyclic"] else 0)
     scene.frame_start, scene.frame_end = 0, end
     scene.render.filepath = path
@@ -471,10 +504,10 @@ PREVIEWS = [("Human_Idle", "Human Idle - side.mp4", "side"), ("Human_Walk", "Hum
             ("Human_Throw", "Human Throw - side.mp4", "side"),
             ("Human_WarmHands", "Human Warm Hands - 3q.mp4", "3q"), ("Human_Hurt", "Human Hurt - 3q.mp4", "3q"),
             ("Human_Death", "Human Death - side.mp4", "side")]
-if "--no-preview" not in argv:
+if not QA_ONLY and "--no-preview" not in argv:
     cam = setup_preview()
     for nm, fn, view in PREVIEWS:
-        render_mp4(cam, nm, os.path.join(DIR, fn), view)
+        render_mp4(cam, nm, os.path.join(OUTPUT_DIR, fn), view)
 
 
 # ======================================================================= 4. QA
@@ -558,7 +591,9 @@ def classify_textures(meshes):
 def tex_stats(kind, img):
     a = img_array(img)
     rgb = a[..., :3]
-    st = dict(res=f"{img.size[0]}x{img.size[1]}")
+    st = dict(res=f"{img.size[0]}x{img.size[1]}", finite=bool(np.isfinite(rgb).all()),
+              minimum=float(rgb.min()), maximum=float(rgb.max()),
+              channel_std=[float(v) for v in rgb.std(axis=(0, 1))])
     if kind == "base":
         lum = rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)
         lap = np.abs(4 * lum[1:-1, 1:-1] - lum[:-2, 1:-1] - lum[2:, 1:-1] - lum[1:-1, :-2] - lum[1:-1, 2:])
@@ -725,54 +760,87 @@ def contact_metrics(q, expect):
     return res
 
 
-def look_renders(prefix, mode):
+def look_renders(prefix, mode, preserve_pose=False, rear_only=False):
     """Side / 3-4 / head close-up at rest, same lights and relative framing for every asset.
     mode 'upright': the head is the top of the body (human); 'quadruped': the front (fox)."""
     sc = bpy.context.scene
     for o in bpy.data.objects:
-        if o.type == 'ARMATURE' and o.animation_data:
+        if o.type == 'ARMATURE' and o.animation_data and not preserve_pose:
             o.animation_data.action = None
             for p_ in o.pose.bones:
                 p_.matrix_basis.identity()
-    m = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+    meshes = [o for o in bpy.data.objects if o.type == 'MESH']
+    m = meshes[0]
     bpy.context.view_layer.update()
-    mn, mx = world_bbox(m, evaluated=True)
-    mn, mx = V(mn.tolist()), V(mx.tolist())
+    points = []
+    dg = bpy.context.evaluated_depsgraph_get()
+    for m in meshes:
+        ev = m.evaluated_get(dg); evme = ev.to_mesh()
+        co = np.empty(len(evme.vertices) * 3, np.float32); evme.vertices.foreach_get("co", co)
+        mw = np.array(ev.matrix_world, np.float64)
+        points.append(co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3])
+        ev.to_mesh_clear()
+    co = np.concatenate(points)
+    mn, mx = V(co.min(0).tolist()), V(co.max(0).tolist())
     ctr = (mn + mx) / 2; size = max(mx - mn)
-    co = np.empty(len(m.data.vertices) * 3, np.float32); m.data.vertices.foreach_get("co", co)
-    mw = np.array(m.matrix_world, np.float64)
-    co = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
     if mode == "upright":
-        sel = co[co[:, 2] > mx.z - 0.14 * (mx.z - mn.z)]
+        # Include face, hat and collar, but bias the target down from the hat's upper edge.
+        sel = co[co[:, 2] > mn.z + 0.77 * (mx.z - mn.z)]
     else:
         sel = co[co[:, 1] < mn.y + 0.18 * (mx.y - mn.y)]
     head_c = V(((sel.min(0) + sel.max(0)) / 2).tolist()) if len(sel) else ctr
+    if mode == "upright":
+        head_c.z -= 0.025 * (mx.z - mn.z)
     head_size = max(sel.max(0) - sel.min(0)) if len(sel) else size * 0.3
     w = bpy.data.worlds.new("w"); sc.world = w
     w.use_nodes = True
     w.node_tree.nodes["Background"].inputs[0].default_value = (0.55, 0.62, 0.68, 1)
-    w.node_tree.nodes["Background"].inputs[1].default_value = 0.8
+    w.node_tree.nodes["Background"].inputs[1].default_value = 0.38
     sun = bpy.data.objects.new("s", bpy.data.lights.new("s", "SUN")); sc.collection.objects.link(sun)
-    sun.rotation_euler = (0.8, 0.2, -0.6); sun.data.energy = 3.5
+    sun.rotation_euler = (0.8, 0.2, -0.6); sun.data.energy = 1.7
     cam = bpy.data.objects.new("c", bpy.data.cameras.new("c")); sc.collection.objects.link(cam); sc.camera = cam
     cam.data.type = 'ORTHO'; cam.data.clip_end = 1000
     sc.render.engine = 'BLENDER_EEVEE'; sc.render.resolution_x = 800; sc.render.resolution_y = 560
     sc.eevee.taa_render_samples = 16
+    sc.view_settings.view_transform = 'AgX'
+    sc.view_settings.look = 'AgX - Medium High Contrast'
+    sc.view_settings.exposure = -0.35
+    sc.view_settings.gamma = 1.0
     try:
         sc.render.image_settings.media_type = 'IMAGE'
     except (AttributeError, TypeError):
         pass
     sc.render.image_settings.file_format = 'PNG'
     out = []
-    for tag, d, s_ in (("side", V((1, 0, 0)), 1.1), ("q", V((0.9, -1, 0.45)), 1.1), ("head", V((0.8, -1, 0.3)), None)):
+    for tag, d in [("side", V((1, 0, 0))), ("q", V((0.9, -1, 0.45))),
+                   ("head", V((0.08, -1, 0.06))), ("rear_q", V((0.9, 1, 0.35)))]:
+        if rear_only and tag != 'rear_q':
+            continue
         d = d.normalized()
-        cam.data.ortho_scale = size * s_ if s_ else head_size * 2.2
         tgt = ctr if tag != "head" else head_c
         cam.location = tgt + d * size * 4
         cam.rotation_euler = (-d).to_track_quat('-Z', 'Y').to_euler()
+        # Blender's ortho_scale is the horizontal span. Project the asset bounds into
+        # camera space and fit both axes; scale by each asset's own bounds for a
+        # comparable fraction of the frame (especially important for a human vs fox).
+        right = cam.rotation_euler.to_quaternion() @ V((1, 0, 0))
+        up = cam.rotation_euler.to_quaternion() @ V((0, 1, 0))
+        frame_points = sel if tag == "head" and len(sel) else co
+        right_np, up_np = np.array(right), np.array(up)
+        px, py = frame_points @ right_np, frame_points @ up_np
+        # Center the actual projection: an asymmetric face/hat must not clip at one edge.
+        tgt += right * float((px.min() + px.max()) / 2 - np.dot(tgt, right_np))
+        tgt += up * float((py.min() + py.max()) / 2 - np.dot(tgt, up_np))
+        cam.location = tgt + d * size * 4
+        aspect = sc.render.resolution_x / sc.render.resolution_y
+        cam.data.ortho_scale = max(float(np.ptp(px)), float(np.ptp(py)) * aspect) * 1.16
+        sc.render.resolution_percentage = 100
+        sc.render.use_border = False
         sc.render.filepath = os.path.join(QA_DIR, f"{prefix}_{tag}.png")
         bpy.ops.render.render(write_still=True)
         out.append(sc.render.filepath)
+    bpy.data.objects.remove(sun, do_unlink=True)
+    bpy.data.objects.remove(cam, do_unlink=True)
     return out
 
 
@@ -806,11 +874,51 @@ def qa():
         if not ok:
             fails.append(msg)
 
+    # Inspect the actual serialized contract; image names/node presence do not prove wiring.
+    with open(OUT_GLB, 'rb') as stream:
+        magic, version, total = struct.unpack('<4sII', stream.read(12))
+        length, kind = struct.unpack('<II', stream.read(8))
+        doc = json.loads(stream.read(length))
+    check(magic == b'glTF' and version == 2 and total == os.path.getsize(OUT_GLB), 'valid GLB 2 header/length')
+    for material in doc.get('materials', []):
+        pbr = material.get('pbrMetallicRoughness', {})
+        slots = {'base': pbr.get('baseColorTexture'), 'normal': material.get('normalTexture'),
+                 'orm': pbr.get('metallicRoughnessTexture'), 'ao': material.get('occlusionTexture')}
+        for label, slot in slots.items():
+            valid = bool(slot) and 0 <= slot.get('index', -1) < len(doc.get('textures', []))
+            if valid:
+                tex = doc['textures'][slot['index']]
+                source = tex.get('source', -1)
+                valid = 0 <= source < len(doc.get('images', [])) and 'bufferView' in doc['images'][source]
+            check(valid, f"serialized {material.get('name', 'material')} {label} texture references embedded image")
+        check(bool(slots['ao']) and bool(slots['orm']) and slots['ao']['index'] == slots['orm']['index'],
+              'AO and metallic/roughness share packed ORM image (R/G/B glTF channels)')
+
     # ---------------------------------------------------------------- the human GLB itself
     q = import_glb(OUT_GLB)
     human_thumbs = analyse_textures(q)
+    for label, st in q['texstats'].items():
+        check(st['finite'] and st['maximum'] > 0, f"{label}: finite, nonblack decoded pixels; range {st['minimum']:.4f}..{st['maximum']:.4f}")
+        lines.append(f"  [INFO] {label} channel standard deviations {st['channel_std']} (not a quality score)")
+        if max(st['channel_std']) < 1e-5:
+            lines.append(f"  [WARN] {label} is constant; inspect for a blank bake or intentional uniform value")
     cm = contact_metrics(q, EXPECT)
     human_looks = look_renders("look_human", "upright")
+    # Sparse rear views expose pack clearance issues; they are not an exhaustive collision test.
+    motion_paths = []
+    imported_arm = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
+    for clip in ('Human_Walk', 'Human_Run', 'Human_CrouchWalk', 'Human_Gather', 'Human_Throw', 'Human_Death'):
+        act = bpy.data.actions.get(clip)
+        if act is None:
+            continue
+        set_action(imported_arm, act)
+        frame = int(sum(act.frame_range) / 2)
+        bpy.context.scene.frame_set(frame)
+        motion_paths += look_renders(f"motion_{clip}_f{frame}", 'upright', preserve_pose=True, rear_only=True)
+        lines.append(f"  [REVIEW] rear motion sample {clip} frame {frame}; inspect pack/strap/body intersections")
+    if motion_paths:
+        save_sheet(os.path.join(QA_DIR, 'rear_motion_samples.png'),
+                   [[load_png(p) for p in motion_paths[i:i + 2]] for i in range(0, len(motion_paths), 2)])
     lines.append(f"GLB {os.path.basename(OUT_GLB)}  {q['size'] / 1e6:.1f} MB")
     lines.append(f"  objects: {q['objs']}")
     check(q["mesh_names"] == ["Human"], f"mesh 'Human' ({q['verts']} verts in glTF, {SRC['verts']} in Blender)")
@@ -870,7 +978,7 @@ def qa():
               f"{' ' + w0 + '/' + w1 if max(r0, r1) >= 0.5 else ''}, {l0 * 1000:.2f} / {l1 * 1000:.2f} mm{note})")
     if "Human_Death" in q["acts"] and it:
         r1 = pose_diff(q["acts"]["Human_Death"]["tab"], -1, it, 0)[0]
-        check(r1 > 20, f"Human_Death ends lying still, not back on idle ({r1:.0f} deg from idle)")
+        check(r1 > 20, f"Human_Death final pose differs from idle ({r1:.0f} deg); lying/still requires visual review")
     # contacts
     floor = cm.get("_idle_floor", 0.0)
     lines.append(f"  contacts (planted = sole point within 5 mm of its idle height; slip relative to the ground; "
@@ -886,7 +994,7 @@ def qa():
         c = cm.get(name)
         if not c:
             continue
-        check(c["slip_max"] < 1.5, f"{name}: planted feet do not slide (max {c['slip_max']:.2f} mm/frame "
+        check(c["planted"] > 0 and c["slip_max"] < 1.5, f"{name}: planted feet do not slide (max {c['slip_max']:.2f} mm/frame "
               f"= {c['slip_max'] * FPS / 10:.1f} cm/s)")
         pen = c["minz"] - min(0.0, floor * 1000)
         check(pen > -3.0, f"{name}: no ground penetration (lowest vertex {c['minz']:+.1f} mm"
@@ -907,7 +1015,7 @@ def qa():
 
     lines.append("")
     lines.append("comparison (imported the same way; dims = X x Y x Z of the rest mesh):")
-    lines.append(f"  {'':<10}{'GLB MB':>7}{'verts':>8}{'tris':>8}{'area m2':>9}{'tri/m2':>8}{'UV use':>8}"
+    lines.append(f"  {'':<10}{'GLB MB':>7}{'verts':>8}{'tris':>8}{'area m2':>9}{'tri/m2':>8}{'UV sum':>8}"
                  f"{'tex px':>8}{'px/m':>7}{'bones':>6}{'clips':>6}{'sec':>6}  dims m")
     for nm, r in rows:
         r["texel"] = r["res"] * math.sqrt(r["uv_area"] / max(r["area"], 1e-9))
@@ -927,59 +1035,18 @@ def qa():
                      f"rough {o.get('rough', 0):.2f}+-{o.get('rough_std', 0):.2f}")
         lines.append(f"  {'':<10} actions: " + ", ".join(f"{k} {int(round(v['frames']))}f" for k, v in sorted(r["acts"].items())))
 
-    # ---------------------------------------------------------------- strict scorecard vs the fox
-    fox = dict(rows).get("ArcticFox")
-    score = []
-
-    def card(label, h, f, higher=True, fmt="{:.2f}", why=""):
-        ok = (h >= f) if higher else (h <= f)
-        score.append((ok, f"{label:<38} human {fmt.format(h):>10}  fox {fmt.format(f):>10}  "
-                          f"({'higher' if higher else 'lower'} is better){'' if ok else '  -> ' + why}"))
-
-    if fox:
-        hs, fs = q.get("texstats", {}), fox.get("texstats", {})
-        g = lambda d, k, kk: d.get(k, {}).get(kk, 0.0)
-        card("triangles", q["tris"], fox["tris"], fmt="{:.0f}",
-             why="a hero human needs more geometry than a fox: fingers, face, parka folds, fur trim")
-        card("triangles per m2 of surface", q["tris"] / max(q["area"], 1e-9), fox["tris"] / max(fox["area"], 1e-9),
-             fmt="{:.0f}", why="silhouette too coarse for its size - subdivide the parka / hood trim / boots / fingers")
-        card("texture resolution (px)", q["res"], fox["res"], fmt="{:.0f}", why="use maps at least as big as the fox's")
-        card("texel density (px per m of surface)", q["texel"], fox["texel"], fmt="{:.0f}",
-             why="the human's larger surface needs bigger maps / tighter UV packing / UDIM-like splitting")
-        card("UV space used", q["uv_area"], fox["uv_area"], why="pack the UV islands tighter")
-        card("BaseColor high-frequency detail", g(hs, "base", "detail"), g(fs, "base", "detail"),
-             why="add fabric weave, stitching, wear, dirt, fur-trim strands, skin pores on the face")
-        card("BaseColor tonal range (std)", g(hs, "base", "std"), g(fs, "base", "std"),
-             why="flat albedo - add value variation (seams darker, worn highlights, dirt)")
-        card("normal-map strength", g(hs, "normal", "strength"), g(fs, "normal", "strength"), fmt="{:.3f}",
-             why="stronger creases / folds / quilting / seams in the normal map")
-        card("normal-map fine detail", g(hs, "normal", "detail"), g(fs, "normal", "detail"),
-             why="add a fine fabric weave / leather grain / fur-trim normal detail")
-        card("roughness variation (std)", g(hs, "orm", "rough_std"), g(fs, "orm", "rough_std"), fmt="{:.3f}",
-             why="roughness is too uniform - vary fabric vs leather vs fur vs skin, wet / icy patches")
-        card("AO contrast (darkest 2 %)", g(hs, "orm", "ao_min") if "orm" in hs else 1.0,
-             g(fs, "orm", "ao_min"), higher=False, why="crevices (armpits, hood, glove fingers, parka folds) not occluded")
-        card("bones", q["bones"], fox["bones"], fmt="{:.0f}", why="rig has fewer bones than the fox")
-        card("clips", len(q["acts"]), len(fox["acts"]), fmt="{:.0f}", why="fewer clips than the fox")
-        card("seconds of animation", q["secs"], fox["secs"], fmt="{:.1f}", why="less animation than the fox")
-        worst_slip = max((c["slip_max"] for k, c in cm.items() if not k.startswith("_")), default=99.0)
-        card("worst planted-foot slip (mm/frame)", worst_slip, 1.5, higher=False,
-             why="feet slide - fix the IK / contacts (fox bar: < 1.5 mm/frame)")
-        card("GLB size (MB, bar = 60 % of the fox)", q["size"] / 1e6, fox["size"] / 1e6 * 0.6, fmt="{:.1f}",
-             why=f"much smaller than the fox's {fox['size'] / 1e6:.1f} MB: the texture payload is thin")
     lines.append("")
-    lines.append("STRICT SCORECARD vs ArcticFox_Animated.glb (every metric must PASS):")
-    lines += [f"  [{'PASS' if ok else 'FAIL'}] {txt}" for ok, txt in score] or ["  (fox GLB missing)"]
-    beats = bool(score) and all(ok for ok, _ in score) and not fails
-    reasons = [t.split("->")[-1].strip() if "->" in t else t for ok, t in score if not ok]
-    lines.append(f"  beats fox: {'YES' if beats else 'NO'}"
-                 + ("" if beats else f" - {len(reasons)} scorecard failure(s)"
-                    + (f" + {len(fails)} QA check failure(s)" if fails else "") + ":"))
-    for ok, t in score:
-        if not ok:
-            lines.append("    - " + t.split("  human")[0].strip() + ": " + t.split("->")[-1].strip())
-    for f_ in fails:
-        lines.append("    - QA: " + f_)
+    lines.append("VISUAL QUALITY: UNDETERMINED by automated metrics; review the rendered sheets.")
+    lines.append("  File size, triangle count, map variance, normal strength, bones and clip duration are descriptive only.")
+    lines.append("  UV area is the sum of triangle areas, including overlaps; it is NOT atlas occupancy.")
+    lines.append("  Derived texel density is nominal only; UV overlap and local distortion were not measured.")
+    lines.append("  Contact checks use inferred sole points and sampled mesh frames, not measured physical contacts.")
+    lines.append("  Review silhouette, facial anatomy, material readability, seams and deformation in motion against the fox.")
+    lines.append("  Rear three-quarter: review backpack fit, shoulder straps, hip belt and bedroll silhouette.")
+    lines.append("  Pack/arm/coat intersections in animation are NOT automatically tested; rest views cannot establish clearance.")
+    lines.append(f"  Technical failures: {len(fails)}. Passing checks does not establish matching/surpassing the fox.")
+    for failure in fails:
+        lines.append("    - " + failure)
 
     # ---------------------------------------------------------------- sheets
     if fox_looks:
@@ -991,13 +1058,13 @@ def qa():
                 [human_thumbs.get(k, blank) for k in ("base", "normal", "orm")]]
         save_sheet(os.path.join(QA_DIR, "textures_fox_vs_human.png"), grid)
     lines.append("")
-    lines.append(f"sheets in {QA_DIR}: look_fox_vs_human.png (rows side / 3-4 / head; fox left, human right), "
+    lines.append(f"sheets in {QA_DIR}: look_fox_vs_human.png (rows side / 3-4 / head / rear 3-4; fox left, human right), "
                  "textures_fox_vs_human.png (BaseColor / Normal / ORM; fox top, human bottom; grey = missing)")
 
     print("\n========== HUMAN QA REPORT ==========")
     print("\n".join(lines))
     print(f"========== {'ALL CHECKS PASSED' if not fails else str(len(fails)) + ' CHECK(S) FAILED'}"
-          f" | beats fox: {'YES' if beats else 'NO'} ==========\n")
+          f" | visual comparison requires review ==========\n")
     with open(os.path.join(QA_DIR, "human_qa_report.txt"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
 

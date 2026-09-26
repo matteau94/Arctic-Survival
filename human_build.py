@@ -3,9 +3,13 @@
     blender -b --python human_build.py      (writes Human_Rigged.blend + textures/Human_*.png)
     HUMAN_STAGE=geo  -> geometry + weights only (preview material, no bakes; for fast iteration)
 
-@@DOC@@
+Imports the supplied Human skeleton.glb as a hidden anatomical guide, measures skull
+cross-sections, and uses them to refine head width while preserving the 66-bone
+HumanRig contract. Builds winter clothing and a skinned expedition backpack.
+Alignment evidence is embedded in the blend and written to the QA directory.
+The source anatomical file is read only; exports are coordinated separately.
 """
-import bpy, bmesh, math, os, sys, time
+import bpy, bmesh, math, os, sys, time, json, hashlib
 import numpy as np
 from mathutils import Vector as V, Matrix
 from mathutils.kdtree import KDTree
@@ -34,6 +38,36 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
 scene.unit_settings.system = 'METRIC'
 BONES = {b["name"]: b for b in human_rig.bones()}
+
+# Supplied anatomical mesh: preserve source file, retain an aligned, hidden guide.
+SOURCE_PATH = os.path.join(DIR, "Human skeleton.glb")
+before_import = set(bpy.data.objects)
+bpy.ops.import_scene.gltf(filepath=SOURCE_PATH)
+source_objects = list(set(bpy.data.objects) - before_import)
+source_points = np.concatenate([np.array([o.matrix_world @ v.co for v in o.data.vertices])
+                                for o in source_objects if o.type == 'MESH'])
+source_min, source_max = source_points.min(0), source_points.max(0)
+source_scale = 1.790 / (source_max[2] - source_min[2])
+source_center_x = (source_min[0] + source_max[0]) / 2
+alignment = Matrix.Scale(float(source_scale), 4) @ Matrix.Translation((-float(source_center_x), 0, -float(source_min[2])))
+REFERENCE = (source_points - [source_center_x, 0, source_min[2]]) * source_scale
+reference_collection = bpy.data.collections.new("REFERENCE_ONLY__Supplied_Anatomy")
+scene.collection.children.link(reference_collection)
+for o in source_objects:
+    for coll in list(o.users_collection): coll.objects.unlink(o)
+    reference_collection.objects.link(o)
+    o.matrix_world = alignment @ o.matrix_world
+    o.name = "REFERENCE__" + o.name
+    o.hide_render = True
+    o.hide_set(True)
+reference_collection.hide_render = True
+reference_collection.hide_viewport = True
+REFERENCE_REPORT = dict(source="Human skeleton.glb", sha256=hashlib.sha256(open(SOURCE_PATH,"rb").read()).hexdigest(),
+    original_height_m=float(source_max[2]-source_min[2]), uniform_scale=float(source_scale),
+    alignment="Z-up retained; facing -Y retained; floor to z=0; X bbox midpoint centered; skull crown z=1.790m. Arms remain in source relaxed pose, not retargeted.",
+    matrix=[list(row) for row in alignment], skull_slice_guides=[])
+log("imported supplied anatomy; scale", source_scale)
+
 
 
 def bh(n):
@@ -304,6 +338,22 @@ SLICES = {
     1.702: [(0, -0.1003), (0.015, -0.0990), (0.030, -0.0950), (0.044, -0.0880), (0.056, -0.0750), (0.066, -0.054), (0.073, -0.025), (0.0765, 0.015), (0.0735, 0.055), (0.052, 0.090), (0, 0.100)],
     1.725: [(0, -0.0970), (0.020, -0.0950), (0.040, -0.0870), (0.056, -0.0720), (0.068, -0.050), (0.075, -0.020), (0.077, 0.015), (0.074, 0.055), (0.052, 0.089), (0, 0.099)],
 }
+# Use measured skull half-width + 6 mm soft tissue to refine jaw/cranial envelope.
+# Eye centers, face bone pivots, body bone lengths and all rig names stay unchanged.
+for z, contour in SLICES.items():
+    if z < 1.54: continue
+    slab = REFERENCE[(REFERENCE[:,2] >= z-.014) & (REFERENCE[:,2] <= z+.014)]
+    if len(slab) < 10: continue
+    skull_half = float(np.quantile(np.abs(slab[:,0]), .985))
+    old_half = max(pt[0] for pt in contour)
+    target_half = skull_half + .006
+    factor = float(np.clip(target_half / old_half, .90, 1.06))
+    # Blend toward reference gently near orbital region to preserve eyelid fit.
+    if 1.645 <= z <= 1.702: factor = 1 + .25*(factor-1)
+    SLICES[z] = [(x*factor, y) for x,y in contour]
+    REFERENCE_REPORT['skull_slice_guides'].append(dict(z=z, skull_half_width=skull_half,
+        old_skin_half_width=old_half, new_skin_half_width=old_half*factor))
+scene['anatomical_reference_alignment'] = json.dumps(REFERENCE_REPORT)
 Z_TOP_REF, Z_TOP = 1.725, 1.790
 NTH = 721
 THS = np.linspace(0, np.pi, NTH)
@@ -579,7 +629,7 @@ log("head skin", len(Vh))
 def build_eye(side):
     e = EYEC * [side, 1, 1]
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=24, radius=RE)
+    bmesh.ops.create_uvsphere(bm, u_segments=64, v_segments=48, radius=RE)
     bmesh.ops.rotate(bm, verts=bm.verts, matrix=Matrix.Rotation(math.radians(90), 3, 'X'))
     for v in bm.verts:
         c = -v.co.y / RE
@@ -1423,7 +1473,8 @@ brow_m, beard_m, scalp_m = hair_masks(Vh)
 HAIR_SRC = []
 for m_, th_, nm_, sc_, sd_, dr_ in ((brow_m, 0.0009, "brows", 160, 11, 0.0002), (beard_m, 0.0034, "beard", 70, 12, 0.0),
                                     (scalp_m, 0.0028, "tufts", 60, 13, 0.0)):
-    Vsh, Fsh, src = build_shell(m_, th_, nm_, sc_, sd_, droop=dr_, step=1 if nm_ == "brows" else 2)
+    Vsh, Fsh, src = build_shell(m_, th_, nm_, sc_, sd_, droop=dr_, step=1)
+    if nm_ == "brows": Vsh = Vh[src] - HN[src] * .0004  # painted brows avoid stepped shell borders
     hp = add_part(nm_, Vsh, Fsh, HAIR, attrs=dict(srcidx=src.astype(float), hkind=np.full(len(Vsh), {"brows": 1.0, "beard": 2.0, "tufts": 3.0}[nm_])))
     log(nm_, len(Vsh))
 
@@ -1439,12 +1490,12 @@ def build_lashes(side):
         zu = z0 + 0.0058 * np.sin(np.pi * tt ** 0.80)
         base = e + A((dx * side, 0, zu))
         base[1] = e[1] - np.sqrt(max((RE + 0.0019) ** 2 - dx ** 2 - zu ** 2, 1e-8))
-        ln = 0.0065 * np.sin(np.pi * (0.15 + 0.7 * tt)) + 0.002
+        ln = 0.0014 * np.sin(np.pi * (0.15 + 0.7 * tt)) + 0.0004
         dirn = nrm(A((dx * side * 0.4, -1.0, 0.55)))
         up = A((0, 0.25, 1.0))
         mid = base + dirn * ln * 0.55 + up * ln * 0.10
         tip = base + dirn * ln * 0.80 + up * ln * 0.55
-        k = 0.00035
+        k = 0.00010
         rows.append([base + up * k, mid + up * k, tip, mid - up * k, base - up * k])
     R = np.array(rows)
     V_, F_ = loft(R, closed=True)
@@ -1528,6 +1579,11 @@ def build_finger(name):
 
     def rad(s, th):
         r = R0 * (1.0 - 0.14 * s / L_)
+        if name == "thumb":
+            # Broad buried base blends into the thenar mound / first web.
+            # Keep ring count and indexing stable for local baked-mesh repair.
+            r = r * (0.45 + 0.55 * smoothstep(0.0, 0.018, s))
+            r = r + 0.004 * g(s, 0.020, 0.014)
         for sj in [s_k] + s_j[:2]:
             r = r + 0.0011 * g(s, sj, 0.006)                                    # knuckle
         palm = np.clip(np.cos(th), 0, 1)                                        # th = 0 toward the palm
@@ -1745,6 +1801,74 @@ DEFORM = [b.name for b in arm.data.bones if b.use_deform]
 # @@WEIGHTS@@
 
 
+# ======================================================================= expedition backpack
+# One skinned mesh; no new bones. Rigid load follows chest, straps blend at shoulders.
+def pack_add(name, verts, faces, pid=POUCH, weights=None):
+    n = len(verts)
+    if weights is None: weights = {'spine_02': np.full(n,.75), 'spine_03': np.full(n,.25)}
+    if name.startswith('hip'):
+        t=smoothstep(1.0,1.165,np.asarray(verts)[:,2])
+        weights={'pelvis':1-t,'spine_01':t}
+    return add_part('pack_'+name, verts, faces, pid, sym='asym', weights=weights)
+
+def pack_box(name, center, half, pid=POUCH, rounding=.012):
+    v,f=box_part(A(center),A((1,0,0)),A((0,0,1)),A((0,1,0)),half[0],half[2],half[1],rounding,16,22)
+    return pack_add(name,v,f,pid)
+
+def pack_tube(name, controls, width, depth, pid=BELT, shoulder=None, hint=(1,0,0)):
+    path,_=resample(catmull(controls,10),60)
+    rings,_,_,_=tube(path,12,lambda s,t: 1/np.sqrt((np.cos(t)/width)**2+(np.sin(t)/depth)**2),A(hint))
+    v,f=loft(rings,cap0=path[0],cap1=path[-1])
+    f=orient_out(v,f,axis_fn=lambda p:path[np.argmin(np.linalg.norm(path-p,axis=1))])
+    weights=None
+    if shoulder:
+        sw=.25*np.exp(-((v[:,2]-1.465)/.07)**2)
+        low=smoothstep(1.25,1.10,v[:,2])*smoothstep(.15,.02,v[:,1])
+        waist=smoothstep(1.0,1.165,v[:,2])
+        weights={'spine_02':.75*(1-sw)*(1-low),'spine_03':.25*(1-sw)*(1-low),shoulder:sw*(1-low),
+                 'pelvis':low*(1-waist),'spine_01':low*waist}
+    return pack_add(name,v,f,pid,weights)
+
+pack_box('main', (0,.285,1.215), (.152,.080,.188),POUCH,.032)
+pack_box('reinforced_base',(0,.289,1.035),(.156,.083,.023),GLOVE,.018)
+pack_box('top_lid',(0,.290,1.422),(.161,.089,.024),BEANIE,.024)
+pack_box('outer_pocket',(0,.388,1.205),(.111,.027,.105),BEANIE,.022)
+pack_box('pocket_flap',(0,.410,1.306),(.118,.013,.021),POUCH,.012)
+for side in (-1,1):
+    pack_box('side_pocket', (side*.18,.28,1.15),(.023,.061,.073),BEANIE,.018)
+    pack_tube('shoulder',[(side*.115,.208,1.38),(side*.143,.070,1.49),(side*.132,-.075,1.47),
+        (side*.12,-.154,1.34),(side*.128,-.153,1.19),(side*.17,-.04,1.075),(side*.15,.20,1.06)],
+        .024,.007,BEANIE,'clavicle'+('.L' if side>0 else '.R'))
+    pack_tube('lid_webbing',[(side*.095,.235,1.456),(side*.095,.36,1.443),(side*.095,.399,1.34),
+        (side*.095,.42,1.275)],.010,.003,GLOVE)
+    pack_box('lid_buckle',(side*.095,.430,1.292),(.015,.006,.019),GOGGLE,.004)
+    pack_box('buckle_bar',(side*.095,.438,1.292),(.009,.002,.003),METAL,.002)
+    # Compression webbing wraps side pockets into the load body.
+    for z in (1.13,1.31):
+        pack_tube('compression',[(side*.147,.195,z),(side*.216,.255,z),(side*.202,.333,z),(side*.150,.374,z)],.009,.003,GLOVE,hint=(0,0,1))
+# Padded hip belt sits outside the parka; broad vertical dimension.
+th=np.linspace(0,2*np.pi,100)
+path=np.stack([.192*np.sin(th),.152*np.cos(th),np.full(len(th),1.055)],-1)
+pack_tube('hipbelt',path,.024,.007,BEANIE,hint=(0,0,1))
+pack_box('hipbuckle',(0,-.165,1.055),(.033,.009,.024),GOGGLE,.005)
+pack_box('hipbuckle_bar',(0,-.177,1.055),(.019,.003,.004),METAL,.002)
+pack_tube('sternum',[(-.12,-.165,1.365),(0,-.182,1.365),(.12,-.165,1.365)],.007,.003,GLOVE,hint=(0,0,1))
+pack_box('sternum_buckle',(0,-.185,1.365),(.014,.005,.010),GOGGLE,.003)
+# Attached rolled sleeping mat below the main pack; visible spiral end caps.
+v,f=cyl(A((-.222,.285,.925)),A((.222,.285,.925)),.079,40)
+pack_add('bedroll',v,f,SCARF)
+for side in (-1,1):
+    a=np.linspace(0,5*np.pi,150);r=.004+.068*a/a[-1]
+    path=np.stack([np.full(len(a),side*.223),.285+r*np.cos(a),.925+r*np.sin(a)],-1)
+    pack_tube('roll_spiral',path,.002,.002,POUCH,hint=(1,0,0))
+    a=np.linspace(0,2*np.pi,80)
+    path=np.stack([np.full(len(a),side*.142),.285+.081*np.cos(a),.925+.081*np.sin(a)],-1)
+    pack_tube('bedroll_tie',path,.010,.003,GLOVE)
+    pack_tube('roll_hanger',[(side*.142,.37,.925),(side*.142,.385,1.015),(side*.142,.378,1.10)],.009,.003,GLOVE)
+pack_tube('carry_handle',[(-.056,.25,1.445),(-.045,.25,1.49),(.045,.25,1.49),(.056,.25,1.445)],.007,.006,GLOVE)
+log('winter expedition backpack added')
+
+
 # ======================================================================= join into one object
 def assemble():
     Vs, Fs, pid, names = [], [], [], []
@@ -1793,6 +1917,9 @@ def assemble():
 
 
 human, WPARTS = assemble()
+human['painted_brow_refinement'] = True
+human['equipment'] = 'Insulated parka, fur hood, beanie, scarf, gloves, trousers, gaiters, boots; expedition backpack with padded shoulder harness, sternum strap, hipbelt, buckles, compression straps, compartments and attached bedroll.'
+human['backpack_parts'] = json.dumps([dict(name=p.name,start=p.off,count=len(p.V)) for p in PARTS if p.name.startswith('pack_')])
 me = human.data
 NV = len(me.vertices)
 CO = np.zeros(NV * 3, np.float32); me.vertices.foreach_get("co", CO); CO = CO.reshape(-1, 3).astype(np.float64)
@@ -2094,12 +2221,16 @@ lstart = np.zeros(nf, np.int32); me.polygons.foreach_get("loop_start", lstart)
 lverts = np.zeros(len(me.loops), np.int32); me.loops.foreach_get("vertex_index", lverts)
 fpart = PART_OF[lverts[lstart]]
 fsymm = SYMM[lverts[lstart]]
-is_small = np.array([PARTS[k].name in SMALL for k in range(len(PARTS))])[fpart]
+is_small = np.array([(PARTS[k].name in SMALL or PARTS[k].name.startswith("pack_")) for k in range(len(PARTS))])[fpart]
 unwrap_f = (fsymm > 1.5) | (fc[:, 0] > 0)
 me.uv_layers.new(name="UVMap")
 
 
 def select_faces(mask):
+    # Clear stale vertex/edge selection before entering face selection mode.
+    scene.tool_settings.mesh_select_mode = (False, False, True)
+    me.vertices.foreach_set("select", np.zeros(len(me.vertices),dtype=bool))
+    me.edges.foreach_set("select", np.zeros(len(me.edges),dtype=bool))
     me.polygons.foreach_set("select", mask.tolist())
     me.update()
 
@@ -2144,15 +2275,21 @@ log("uv: unwrapped + packed", int(unwrap_f.sum()), "faces")
 # mirror the x > 0 UVs onto the x < 0 faces of the symmetric parts
 uv = np.zeros(len(me.loops) * 2, np.float32); me.uv_layers[0].data.foreach_get("uv", uv); uv = uv.reshape(-1, 2)
 src_f = np.nonzero(unwrap_f & (fsymm < 1.5))[0]
-kd = KDTree(len(src_f))
-for i_, f in enumerate(src_f):
-    kd.insert(fc[f], i_)
-kd.balance()
+# Mirror only within the same anatomical/garment part, never across nearby shells.
+def uv_part_key(f):
+    return PARTS[fpart[f]].name.removesuffix('.L').removesuffix('.R')
+mirror_sources = {}
+for f in src_f: mirror_sources.setdefault(uv_part_key(f), []).append(int(f))
+mirror_trees = {}
+for key, faces in mirror_sources.items():
+    tree = KDTree(len(faces))
+    for f in faces: tree.insert(fc[f],f)
+    tree.balance(); mirror_trees[key] = tree
 lend = np.append(lstart[1:], len(me.loops))
 nm_ = 0
 for f in np.nonzero(~unwrap_f)[0]:
     c = fc[f]
-    g_ = src_f[kd.find((-c[0], c[1], c[2]))[1]]
+    g_ = mirror_trees[uv_part_key(f)].find((-c[0], c[1], c[2]))[1]
     gl = np.arange(lstart[g_], lend[g_])
     gv = CO[lverts[gl]]
     for l_ in range(lstart[f], lend[f]):
@@ -2164,13 +2301,13 @@ log("uv: mirrored", nm_, "faces")
 
 
 # ======================================================================= preview material (geo stage)
-PART_COLORS = {SKIN: (0.62, 0.42, 0.34), EYE: (0.9, 0.9, 0.9), MOUTH: (0.5, 0.15, 0.15), TEETH: (0.9, 0.88, 0.8),
-               HAIR: (0.18, 0.12, 0.08), BEANIE: (0.15, 0.2, 0.18), GOGGLE: (0.05, 0.05, 0.05), LENS: (0.8, 0.45, 0.1),
-               PARKA: (0.45, 0.07, 0.05), FUR: (0.45, 0.38, 0.30), HOOD: (0.42, 0.07, 0.05), SCARF: (0.75, 0.70, 0.60),
-               GLOVE: (0.10, 0.09, 0.08), TROUSERS: (0.16, 0.17, 0.18), GAITER: (0.07, 0.07, 0.08), BOOT: (0.30, 0.18, 0.10),
-               SOLE: (0.04, 0.04, 0.04), BELT: (0.25, 0.14, 0.07), METAL: (0.6, 0.6, 0.62), SHEATH: (0.40, 0.26, 0.14),
-               KNIFE: (0.30, 0.22, 0.14), POUCH: (0.30, 0.30, 0.22), TOGGLE: (0.35, 0.25, 0.15), CORD: (0.1, 0.1, 0.1),
-               LASH: (0.05, 0.03, 0.02)}
+PART_COLORS = {SKIN: (0.34, 0.20, 0.15), EYE: (0.54, 0.49, 0.40), MOUTH: (0.22, 0.055, 0.05), TEETH: (0.62, 0.55, 0.42),
+               HAIR: (0.055, 0.032, 0.020), BEANIE: (0.045, 0.075, 0.072), GOGGLE: (0.018, 0.024, 0.028), LENS: (0.25, 0.12, 0.035),
+               PARKA: (0.205, 0.060, 0.038), FUR: (0.25, 0.20, 0.135), HOOD: (0.16, 0.048, 0.034), SCARF: (0.29, 0.27, 0.22),
+               GLOVE: (0.045, 0.040, 0.034), TROUSERS: (0.055, 0.067, 0.075), GAITER: (0.035, 0.039, 0.043), BOOT: (0.13, 0.075, 0.038),
+               SOLE: (0.018, 0.021, 0.022), BELT: (0.095, 0.052, 0.025), METAL: (0.29, 0.30, 0.29), SHEATH: (0.15, 0.085, 0.045),
+               KNIFE: (0.16, 0.14, 0.105), POUCH: (0.105, 0.095, 0.066), TOGGLE: (0.17, 0.11, 0.055), CORD: (0.028, 0.026, 0.022),
+               LASH: (0.012, 0.008, 0.006)}
 
 
 def preview_material():
@@ -2199,6 +2336,272 @@ if STAGE == "geo":
     log("geo stage saved")
     sys.exit(0) if bpy.app.background else None
 
-# @@TEXTURES@@
+# Painted anatomical color zones, kept as vertex attributes for reproducible bakes.
+paint=np.array([PART_COLORS[int(round(k))] for k in PID],dtype=np.float64)
+x,y,z=np.abs(CO[:,0]),CO[:,1],CO[:,2]
+skin_color=np.tile(A(PART_COLORS[SKIN]),(NV,1))
+front=smoothstep(-.025,-.075,y)
+flush=(g(x,.045,.025)*g(z,1.645,.021)*.40 + g(x,0,.016)*g(z,1.635,.022)*.25)*front
+skin_color=skin_color*(1-flush[:,None])+A((.43,.15,.115))*flush[:,None]
+zst,zu,zl=lip_lines(np.minimum(x,MW));zd=zdes(z)
+lip=smoothstep(MW+.002,MW-.002,x)*smoothstep(zl-.002,zl+.001,zd)*smoothstep(zu+.002,zu-.001,zd)*front
+skin_color=skin_color*(1-lip[:,None])+A((.31,.105,.085))*lip[:,None]
+undereye=g(x,.033,.014)*g(z,1.652,.004)*front*.17
+skin_color*=1-undereye[:,None]
+brow,beard,scalp=hair_masks(CO)
+# Fine stubble is painted underneath the shells to eliminate bare stair-step edges.
+stubble=np.maximum(brow*.65,beard*.18)
+skin_color=skin_color*(1-stubble[:,None])+A((.070,.037,.022))*stubble[:,None]
+paint[PID==SKIN]=skin_color[PID==SKIN]
+for part_ in PARTS:
+ if part_.name in ('brows','beard','tufts'):
+  ii=np.arange(part_.off,part_.off+len(part_.V))
+  coverage={'brows':brow,'beard':beard,'tufts':scalp}[part_.name][ii]
+  coverage=smoothstep(.03,.8,coverage)
+  strand=.85+.15*np.sin(CO[ii,0]*6200+CO[ii,2]*470+np.sin(CO[ii,2]*1300))
+  hair=A((.048,.025,.013))*strand[:,None]
+  paint[ii]=skin_color[ii]*(1-coverage[:,None])+hair*coverage[:,None]
+color_attr=me.color_attributes.new(name='Human_PaintedColor',type='FLOAT_COLOR',domain='POINT')
+rgba=np.ones((NV,4),np.float32);rgba[:,:3]=paint;color_attr.data.foreach_set('color',rgba.ravel())
+# Physical roughness by material, not the arbitrary numeric part identifier.
+rough_values=[.49,.16,.38,.28,.76,.86,.33,.12,.78,.93,.82,.88,.68,.81,.73,.58,.91,.62,.26,.59,.40,.80,.46,.83,.55]
+rough_attr=me.attributes.new('Human_RoughnessValue','FLOAT','POINT')
+rough_attr.data.foreach_set('value',np.array([rough_values[int(round(k))] for k in PID],np.float32))
 
-# @@FINAL@@
+
+# ======================================================================= PBR texture bake
+os.makedirs(TEX, exist_ok=True)
+scene.render.engine = 'CYCLES'
+scene.cycles.device = 'CPU'
+scene.cycles.samples = 16
+scene.view_settings.view_transform = 'AgX'
+scene.view_settings.look = 'AgX - Medium High Contrast'
+scene.view_settings.exposure = -0.65
+scene.view_settings.gamma = 1.0
+if scene.world is None:
+    scene.world = bpy.data.worlds.new("ArcticStudioWorld")
+scene.world.use_nodes = True
+scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.38, 0.43, 0.48, 1)
+scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.22
+scene.render.bake.margin = 16
+scene.render.bake.margin_type = 'EXTEND'
+scene.render.bake.use_clear = True
+mat = bpy.data.materials.new("Human_ArcticSurvivor_PBR")
+mat.use_nodes = True
+me.materials.clear(); me.materials.append(mat)
+nt = mat.node_tree; nodes = nt.nodes; links = nt.links
+bs = nodes.get("Principled BSDF")
+part = nodes.new("ShaderNodeAttribute"); part.attribute_name = "part"
+div = nodes.new("ShaderNodeMath"); div.operation = 'DIVIDE'; div.inputs[1].default_value = 32.0
+links.new(part.outputs["Fac"], div.inputs[0])
+ramp = nodes.new("ShaderNodeValToRGB"); ramp.color_ramp.interpolation = 'CONSTANT'
+els = ramp.color_ramp.elements
+ks = sorted(PART_COLORS)
+els[0].position = 0.0; els[0].color = (*PART_COLORS[ks[0]], 1)
+els[1].position = (ks[1] - 0.25) / 32.0; els[1].color = (*PART_COLORS[ks[1]], 1)
+for k in ks[2:]:
+    e = els.new((k - 0.25) / 32.0); e.color = (*PART_COLORS[k], 1)
+links.new(div.outputs[0], ramp.inputs[0])
+# Layered, object-space mottling plus a tighter weave-scale signal keeps seams and fabric
+# readable at game camera distance while preserving the restrained, cold-weather palette.
+texcoord = nodes.new("ShaderNodeTexCoord")
+noise = nodes.new("ShaderNodeTexNoise"); noise.inputs["Scale"].default_value = 145.0
+noise.inputs["Detail"].default_value = 4.0; noise.inputs["Roughness"].default_value = 0.78
+links.new(texcoord.outputs["Object"], noise.inputs["Vector"])
+weave = nodes.new("ShaderNodeTexNoise"); weave.inputs["Scale"].default_value = 460.0
+weave.inputs["Detail"].default_value = 2.0; weave.inputs["Roughness"].default_value = 0.84
+links.new(texcoord.outputs["Object"], weave.inputs["Vector"])
+tone = nodes.new("ShaderNodeMapRange"); tone.clamp = True
+tone.inputs["From Min"].default_value = 0.0; tone.inputs["From Max"].default_value = 1.0
+tone.inputs["To Min"].default_value = 0.62; tone.inputs["To Max"].default_value = 1.18
+links.new(noise.outputs["Fac"], tone.inputs["Value"])
+mul = nodes.new("ShaderNodeMixRGB"); mul.blend_type = 'MULTIPLY'; mul.inputs[0].default_value = 1.0
+paint_node = nodes.new("ShaderNodeAttribute"); paint_node.attribute_name = "Human_PaintedColor"
+links.new(paint_node.outputs["Color"], mul.inputs[1]); links.new(tone.outputs["Result"], mul.inputs[2])
+micro = nodes.new("ShaderNodeMapRange"); micro.clamp = True
+micro.inputs["From Min"].default_value = 0.0; micro.inputs["From Max"].default_value = 1.0
+micro.inputs["To Min"].default_value = 0.82; micro.inputs["To Max"].default_value = 1.18
+links.new(weave.outputs["Fac"], micro.inputs["Value"])
+detailmul = nodes.new("ShaderNodeMixRGB"); detailmul.blend_type = 'MULTIPLY'; detailmul.inputs[0].default_value = 0.78
+links.new(mul.outputs[0], detailmul.inputs[1]); links.new(micro.outputs["Result"], detailmul.inputs[2])
+# Directional fiber detail for hair and fur, separate from isotropic fabric mottling.
+fcoord=nodes.new('ShaderNodeVectorMath');fcoord.operation='MULTIPLY';fcoord.inputs[1].default_value=(1200,1200,95)
+links.new(texcoord.outputs['Object'],fcoord.inputs[0])
+fnoise=nodes.new('ShaderNodeTexNoise');fnoise.inputs['Scale'].default_value=1;fnoise.inputs['Detail'].default_value=2
+links.new(fcoord.outputs[0],fnoise.inputs['Vector'])
+fm=nodes.new('ShaderNodeMapRange');fm.inputs['To Min'].default_value=.48;fm.inputs['To Max'].default_value=1.35
+links.new(fnoise.outputs['Fac'],fm.inputs['Value'])
+fiber_mask=[]
+for kind in (HAIR,FUR):
+    cmp=nodes.new('ShaderNodeMath');cmp.operation='COMPARE';cmp.inputs[1].default_value=kind;cmp.inputs[2].default_value=.1
+    links.new(part.outputs['Fac'],cmp.inputs[0]);fiber_mask.append(cmp.outputs[0])
+mask_sum=nodes.new('ShaderNodeMath');mask_sum.operation='ADD'
+links.new(fiber_mask[0],mask_sum.inputs[0]);links.new(fiber_mask[1],mask_sum.inputs[1])
+fibermul=nodes.new('ShaderNodeMixRGB');fibermul.blend_type='MULTIPLY'
+links.new(mask_sum.outputs[0],fibermul.inputs[0]);links.new(detailmul.outputs[0],fibermul.inputs[1]);links.new(fm.outputs[0],fibermul.inputs[2])
+# Analytic iris/pupil rings evaluated per baked pixel, independent of vertex sampling.
+def mathnode(op,a,b=None):
+    n=nodes.new('ShaderNodeMath'); n.operation=op
+    for i,v in enumerate([a,b]):
+        if v is None: continue
+        if isinstance(v,(int,float)): n.inputs[i].default_value=v
+        else: links.new(v,n.inputs[i])
+    return n.outputs[0]
+xyz=nodes.new('ShaderNodeSeparateXYZ');links.new(texcoord.outputs['Object'],xyz.inputs[0])
+ex=mathnode('SUBTRACT',mathnode('ABSOLUTE',xyz.outputs['X']),float(EYEC[0]))
+ez=mathnode('SUBTRACT',xyz.outputs['Z'],float(EYEC[2]))
+radius=mathnode('SQRT',mathnode('ADD',mathnode('MULTIPLY',ex,ex),mathnode('MULTIPLY',ez,ez)))
+iris=nodes.new('ShaderNodeValToRGB'); iris.color_ramp.interpolation='LINEAR'
+icolor=[(0,(.004,.003,.002,1)),(.0023,(.006,.006,.004,1)),(.00265,(.10,.12,.075,1)),
+ (.0048,(.045,.075,.064,1)),(.0056,(.016,.027,.022,1)),(.0061,(.015,.023,.020,1)),
+ (.00645,(.60,.55,.46,1)),(.012,(.69,.64,.55,1))]
+els=iris.color_ramp.elements
+els.remove(els[1]);els[0].position=0;els[0].color=icolor[0][1]
+for pos,col in icolor[1:]:
+    el=els.new(pos/.015);el.color=col
+links.new(mathnode('DIVIDE',radius,.015),iris.inputs[0])
+is_eye=mathnode('COMPARE',part.outputs['Fac'],1.0)
+# COMPARE uses its third socket for tolerance; default .5 is suitable for discrete part IDs.
+eyemix=nodes.new('ShaderNodeMixRGB');links.new(is_eye,eyemix.inputs[0]);links.new(fibermul.outputs[0],eyemix.inputs[1]);links.new(iris.outputs[0],eyemix.inputs[2])
+links.new(eyemix.outputs[0],bs.inputs['Base Color'])
+bs.inputs["Roughness"].default_value = 0.72
+img = bpy.data.images.new("Human_BaseColor", width=RES, height=RES, alpha=False)
+img.file_format = 'PNG'; img.filepath_raw = os.path.join(TEX, "Human_BaseColor.png")
+target = nodes.new("ShaderNodeTexImage"); target.name = "Human_BaseColor_BakeTarget"; target.image = img
+nodes.active = target
+for n in nodes: n.select = (n == target)
+bpy.ops.object.select_all(action='DESELECT'); human.select_set(True); bpy.context.view_layer.objects.active = human
+log("baking base color", RES)
+bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, margin=16, use_clear=True)
+img.save()
+log("saved base color", img.filepath_raw)
+# Bake a tangent-space normal from fine irregular cloth/leather grain. Face skin receives a
+# shared fine grain; material roughness is differentiated in the ORM bake.
+normal = bpy.data.images.new("Human_Normal", width=RES, height=RES, alpha=False)
+normal.file_format = 'PNG'; normal.filepath_raw = os.path.join(TEX, "Human_Normal.png")
+normal.colorspace_settings.name = 'Non-Color'
+normal.generated_color = (0.5, 0.5, 1.0, 1.0)
+neutral = np.empty(RES * RES * 4, np.float32); neutral.reshape(-1, 4)[:] = (0.5, 0.5, 1.0, 1.0)
+normal.pixels.foreach_set(neutral); del neutral
+for n in nodes: nodes.remove(n)
+out = nodes.new("ShaderNodeOutputMaterial"); nbs = nodes.new("ShaderNodeBsdfPrincipled")
+links.new(nbs.outputs[0], out.inputs[0])
+tc = nodes.new("ShaderNodeTexCoord")
+grain = nodes.new("ShaderNodeTexNoise"); grain.inputs["Scale"].default_value = 620.0
+grain.inputs["Detail"].default_value = 2.0; grain.inputs["Roughness"].default_value = 0.82
+links.new(tc.outputs["Object"], grain.inputs["Vector"])
+fine = nodes.new("ShaderNodeTexNoise"); fine.inputs["Scale"].default_value = 1700.0
+fine.inputs["Detail"].default_value = 1.5; links.new(tc.outputs["Object"], fine.inputs["Vector"])
+grainmix = nodes.new("ShaderNodeMixRGB"); grainmix.blend_type = 'MIX'; grainmix.inputs[0].default_value = 0.32
+links.new(grain.outputs["Fac"], grainmix.inputs[1]); links.new(fine.outputs["Fac"], grainmix.inputs[2])
+bump = nodes.new("ShaderNodeBump"); bump.inputs["Strength"].default_value = 0.26
+bump.inputs["Distance"].default_value = 0.0010
+links.new(grainmix.outputs[0], bump.inputs["Height"]); links.new(bump.outputs["Normal"], nbs.inputs["Normal"])
+target = nodes.new("ShaderNodeTexImage"); target.image = normal; target.select = True; nodes.active = target
+for n in nodes:
+    if n != target: n.select = False
+bpy.context.view_layer.update()
+bake_result = bpy.ops.object.bake(type='NORMAL', normal_space='TANGENT', margin=16, use_clear=False)
+if 'FINISHED' not in bake_result: raise RuntimeError(f"Tangent normal bake failed: {bake_result}")
+normal.save()
+normal_probe = normal.copy(); normal_probe.scale(1024, 1024)
+na = np.empty(1024 * 1024 * 4, np.float32); normal_probe.pixels.foreach_get(na)
+nrgb = na.reshape(1024, 1024, 4)[..., :3]; nxy = nrgb[..., :2] * 2 - 1
+normal_strength = float(np.sqrt((nxy * nxy).sum(-1)).mean())
+normal_detail = float(np.abs(4 * np.sqrt((nxy * nxy).sum(-1))[1:-1, 1:-1] - np.sqrt((nxy * nxy).sum(-1))[:-2, 1:-1] - np.sqrt((nxy * nxy).sum(-1))[2:, 1:-1] - np.sqrt((nxy * nxy).sum(-1))[1:-1, :-2] - np.sqrt((nxy * nxy).sum(-1))[1:-1, 2:]).mean() * 100)
+bpy.data.images.remove(normal_probe); del na, nrgb, nxy
+log("saved tangent normal; pixel stats strength/detail", round(normal_strength, 4), round(normal_detail, 3))
+if normal_strength > 0.35 or normal_detail < 0.5: raise RuntimeError("Tangent normal bake is blank/invalid; refusing final save")
+# ORM bake: R=ambient occlusion, G=part-aware textured roughness, B=metallic hardware mask.
+orm = bpy.data.images.new("Human_ORM", width=RES, height=RES, alpha=False)
+orm.file_format = 'PNG'; orm.filepath_raw = os.path.join(TEX, "Human_ORM.png")
+orm.colorspace_settings.name = 'Non-Color'; orm.generated_color = (1.0, 0.78, 0.0, 1.0)
+neutral_orm = np.empty(RES * RES * 4, np.float32); neutral_orm.reshape(-1, 4)[:] = (1.0, 0.78, 0.0, 1.0)
+orm.pixels.foreach_set(neutral_orm); del neutral_orm
+for n in nodes: nodes.remove(n)
+out = nodes.new("ShaderNodeOutputMaterial"); orm_bs = nodes.new("ShaderNodeBsdfPrincipled")
+att = nodes.new("ShaderNodeAttribute"); att.attribute_name = "part"
+rm = nodes.new("ShaderNodeMapRange"); rm.clamp = True
+rm.inputs["From Min"].default_value = 0.0; rm.inputs["From Max"].default_value = 24.0
+rm.inputs["To Min"].default_value = 0.94; rm.inputs["To Max"].default_value = 0.28
+links.new(att.outputs["Fac"], rm.inputs["Value"])
+coord = nodes.new("ShaderNodeTexCoord"); rn = nodes.new("ShaderNodeTexNoise")
+rn.inputs["Scale"].default_value = 310.0; rn.inputs["Detail"].default_value = 3.0
+links.new(coord.outputs["Object"], rn.inputs["Vector"])
+roughvar = nodes.new("ShaderNodeMapRange"); roughvar.clamp = True
+roughvar.inputs["From Min"].default_value = 0.0; roughvar.inputs["From Max"].default_value = 1.0
+roughvar.inputs["To Min"].default_value = 0.82; roughvar.inputs["To Max"].default_value = 1.10
+links.new(rn.outputs["Fac"], roughvar.inputs["Value"])
+roughmul = nodes.new("ShaderNodeMath"); roughmul.operation = 'MULTIPLY'
+physical_rough = nodes.new("ShaderNodeAttribute"); physical_rough.attribute_name = "Human_RoughnessValue"
+links.new(physical_rough.outputs["Fac"], roughmul.inputs[0]); links.new(roughvar.outputs["Result"], roughmul.inputs[1])
+ao = nodes.new("ShaderNodeAmbientOcclusion"); ao.inputs["Distance"].default_value = 0.18
+is_metal = nodes.new("ShaderNodeMath"); is_metal.operation = 'COMPARE'
+is_metal.inputs[1].default_value = float(METAL); is_metal.inputs[2].default_value = 0.5
+links.new(att.outputs["Fac"], is_metal.inputs[0])
+comb = nodes.new("ShaderNodeCombineColor"); comb.mode = 'RGB'
+links.new(ao.outputs["AO"], comb.inputs["Red"])
+links.new(roughmul.outputs[0], comb.inputs["Green"])
+links.new(is_metal.outputs[0], comb.inputs["Blue"])
+links.new(comb.outputs["Color"], orm_bs.inputs["Base Color"]); links.new(orm_bs.outputs[0], out.inputs[0])
+ot = nodes.new("ShaderNodeTexImage"); ot.image = orm; ot.select = True; nodes.active = ot
+for n in nodes:
+    if n != ot: n.select = False
+bpy.context.view_layer.update()
+orm_result = bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, margin=16, use_clear=False)
+if 'FINISHED' not in orm_result: raise RuntimeError(f"ORM bake failed: {orm_result}")
+orm.save()
+orm_probe = orm.copy(); orm_probe.scale(1024, 1024)
+oa = np.empty(1024 * 1024 * 4, np.float32); orm_probe.pixels.foreach_get(oa)
+orgb = oa.reshape(1024, 1024, 4)[..., :3]
+orm_ao, orm_rough = float(orgb[..., 0].mean()), float(orgb[..., 1].std())
+bpy.data.images.remove(orm_probe); del oa, orgb
+log("saved ORM; pixel stats AO/roughness std", round(orm_ao, 4), round(orm_rough, 4))
+if orm_ao < 0.2 or orm_rough < 0.02: raise RuntimeError("ORM bake is blank/flat; refusing final save")
+# Keep the standalone roughness map synchronized with ORM.G.
+rough_image=bpy.data.images.new('Human_Roughness',width=RES,height=RES,alpha=False)
+rough_image.colorspace_settings.name='Non-Color'
+rough_pixels=np.empty(RES*RES*4,np.float32);orm.pixels.foreach_get(rough_pixels)
+rough_pixels=rough_pixels.reshape(-1,4)
+rough_pixels[:,:3]=rough_pixels[:,1:2];rough_pixels[:,3]=1
+rough_image.pixels.foreach_set(rough_pixels.ravel())
+rough_image.filepath_raw=os.path.join(TEX,'Human_Roughness.png');rough_image.file_format='PNG';rough_image.save()
+bpy.data.images.remove(rough_image);del rough_pixels
+
+# Restore final PBR material and keep all texture files embedded in the .blend.
+for n in list(nodes): nodes.remove(n)
+out = nodes.new("ShaderNodeOutputMaterial"); bs = nodes.new("ShaderNodeBsdfPrincipled")
+links.new(bs.outputs[0], out.inputs[0])
+ct = nodes.new("ShaderNodeTexImage"); ct.image = img
+links.new(ct.outputs["Color"], bs.inputs["Base Color"])
+ormtex = nodes.new("ShaderNodeTexImage"); ormtex.image = orm; ormtex.image.colorspace_settings.name = 'Non-Color'
+sep = nodes.new("ShaderNodeSeparateColor"); sep.mode = 'RGB'
+links.new(ormtex.outputs["Color"], sep.inputs["Color"])
+links.new(sep.outputs["Green"], bs.inputs["Roughness"])
+links.new(sep.outputs["Blue"], bs.inputs["Metallic"])
+# Keep base color directly connected: Blender's glTF exporter needs this standard node path.
+# ORM.R remains available for glTF occlusion-capable viewers and export QA.
+normaltex = nodes.new("ShaderNodeTexImage"); normaltex.image = normal
+normaltex.image.colorspace_settings.name = 'Non-Color'
+normalmap = nodes.new("ShaderNodeNormalMap"); links.new(normaltex.outputs["Color"], normalmap.inputs["Color"])
+links.new(normalmap.outputs["Normal"], bs.inputs["Normal"])
+for image_ in (img, orm, normal): image_.pack()
+
+# Baked albedo already contains this paint; do not export a duplicate vertex-color multiplier.
+if "Human_PaintedColor" in me.color_attributes:
+    me.color_attributes.remove(me.color_attributes["Human_PaintedColor"])
+
+# ======================================================================= final rigged deliverable
+human.name = "Human"; human.data.name = "Human"
+arm.name = "HumanRig"
+scene.render.fps = 30
+scene.frame_start = 1; scene.frame_end = 30
+bpy.ops.object.select_all(action='DESELECT')
+human.select_set(True); arm.select_set(True); bpy.context.view_layer.objects.active = human
+report_text=bpy.data.texts.new('Human_Anatomical_Reference_Alignment.json')
+report_text.write(json.dumps(REFERENCE_REPORT,indent=2))
+with open(os.path.join(DIR,'human_qa_checkpoint','Human_alignment.json'),'w') as f: json.dump(REFERENCE_REPORT,f,indent=2)
+bpy.ops.wm.save_as_mainfile(filepath=OUT, compress=True)
+log("final saved", OUT, "vertices", len(me.vertices), "bones", len(arm.data.bones))
+
+

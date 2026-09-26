@@ -6,6 +6,7 @@ so chunks can be generated in any order and always match at the seams.
 Height pipeline (in order):
     base, land = ocean.continent(X, Y)          # ice-sheet plateau + sea floor, land in [0,1]
     h  = base + mountains.height(X, Y, land)    # additive ranges (0 over sea)
+    h += chunk_variation.height_delta(X, Y, land) # unique seamless relief across chunk centers
     h  = valleys.carve(X, Y, h, land)           # U-shaped glacial valleys along network.py
     h  = rivers.carve(X, Y, h, land)            # flat frozen river beds in valley floors
     h  = ocean.coast(X, Y, h, land)             # ice cliffs, shelves, fjords, beaches
@@ -23,15 +24,16 @@ placement / floating origin. Keep object counts low (instancing / merged meshes)
 import numpy as np
 from dataclasses import dataclass, field
 from .config import CHUNK_SIZE, LOD_RES
-from . import ocean, mountains, valleys, rivers
+from . import ocean, mountains, valleys, rivers, penguin_nesting, arctic_fox_dens, chunk_variation, wildlife
 
-FEATURES = (ocean, mountains, valleys, rivers)
+FEATURES = (ocean, mountains, valleys, rivers, penguin_nesting, arctic_fox_dens, wildlife)
 
 
 def height(X, Y, return_land=False):
     X = np.asarray(X, dtype=np.float64); Y = np.asarray(Y, dtype=np.float64)
     base, land = ocean.continent(X, Y)
     h = base + mountains.height(X, Y, land)
+    h += chunk_variation.height_delta(X, Y, land)
     h = valleys.carve(X, Y, h, land)
     h = rivers.carve(X, Y, h, land)
     h = ocean.coast(X, Y, h, land)
