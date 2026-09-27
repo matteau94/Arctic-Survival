@@ -1,0 +1,23 @@
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..');
+(async()=>{
+  const three=new vm.SourceTextModule(fs.readFileSync(path.join(root,'viewer/vendor/three.module.js'),'utf8'));
+  await three.link(()=>{});await three.evaluate();const THREE=three.namespace;
+  const snow=new vm.SourceTextModule('export const stamps=[];export function createSnowImpressions(){return {stamp(...args){stamps.push(args)},update(){}};}');
+  await snow.link(()=>{});await snow.evaluate();
+  const mod=new vm.SourceTextModule(fs.readFileSync(path.join(root,'viewer/footprints.js'),'utf8'));
+  await mod.link(name=>name==='three'?three:snow);await mod.evaluate();
+  const scene=new THREE.Scene(),rig=new THREE.Group();
+  const vertices=[new THREE.Vector3(0,.003,.15),new THREE.Vector3(0,.12,-.12)];
+  const mesh={skeleton:{update(){}},matrixWorld:new THREE.Matrix4(),getVertexPosition(i,p){return p.copy(vertices[i]);}};
+  const player={root:rig,state:'Idle',soleSamples:vertices.map((v,index)=>({mesh,index,side:'L'}))};
+  const update=mod.namespace.createFootprints(scene,{height:()=>0},player),stamps=snow.namespace.stamps;
+  update();assert.equal(stamps.length,1,'Tiptoe compresses only toe snow, including idle');
+  assert.ok(stamps[0][1]>.1,'Contact at actual sole location');
+  for(let i=0;i<60;i++)update();assert.equal(stamps.length,1,'Held contact does not repeatedly deepen snow');
+  vertices[1].y=.003;update();assert.equal(stamps.length,2,'Heel lowering compresses new region');
+  vertices.forEach(v=>v.y=.2);update();assert.equal(stamps.length,2,'Airborne boots do not compress snow');
+  vertices[0].y=.003;update();assert.equal(stamps.length,3,'Same-location recontact');
+  vertices[0].x+=.03;update();assert.equal(stamps.length,4,'Sliding/turning contact traces new snow');
+  console.log('PASS: partial sole contact, idle contact, airborne exclusion, stationary deduplication, recontact and sliding.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

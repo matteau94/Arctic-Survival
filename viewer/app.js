@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createTerrainTiles, createTerrainMaterial } from './terrain-render.js';
-import { surface, register, updateGame } from './gameplay.js';
+import { surface, register, updateGame, updateFootContact } from './gameplay.js';
+import { createFootprints } from './footprints.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 const $ = id => document.getElementById(id);
@@ -13,12 +14,11 @@ scene.add(new THREE.HemisphereLight(0xdff5ff,0x485263,1.05));
 const sun = new THREE.DirectionalLight(0xfff4df,2.5);sun.position.set(-8000,4500,6000);scene.add(sun);
 const ocean=new THREE.Mesh(new THREE.PlaneGeometry(1000000,1000000),new THREE.MeshStandardMaterial({color:0x247993,transparent:true,opacity:.4,roughness:.3,depthWrite:false,side:THREE.DoubleSide}));ocean.rotation.x=-Math.PI/2;scene.add(ocean);
 const actors=[],terrainMeshes=[],cameraObstacles=[],keys=new Set();
-let player=null,ready=false,locked=false,yaw=0,pitch=-.18;
+let player=null,ready=false,locked=false,yaw=0,pitch=-.18,updateFootprints=null;
 const aim=new THREE.Vector3(),look=new THREE.Vector3(),offset=new THREE.Vector3(),cameraProbe=new THREE.Vector3();
 const cameraRay=new THREE.Raycaster();
 function updateCamera(){
   if(!player)return;
-  player.root.rotation.y=yaw;
   aim.copy(player.root.position);aim.y+=keys.has('KeyC')?1.05:1.5;
   look.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
   offset.copy(look).multiplyScalar(-1);
@@ -95,7 +95,7 @@ function groundAnimal(a){
 
 async function loadTerrain(entry){const response=await fetch('/viewer/data/'+entry.file);if(!response.ok)throw new Error(`Terrain ${entry.file}: HTTP ${response.status}`);const buffer=await response.arrayBuffer(),n=entry.vertexCount*3;const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(buffer,0,n),3));geometry.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(buffer,n*4,n),3));geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(buffer,n*8,n),3));geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer,n*12,entry.indexCount),1));surface.add(geometry.attributes.position.array, geometry.index.array);geometry.computeBoundingBox();const material=createTerrainMaterial(THREE);for(const mesh of createTerrainTiles(THREE,geometry,material)){scene.add(mesh);mesh.updateMatrixWorld(true);terrainMeshes.push(mesh);}}
 
-async function init(){const response=await fetch('/viewer/data/world.json');if(!response.ok)throw new Error(`World manifest: HTTP ${response.status}`);const world=await response.json();const terrains=Array.isArray(world.terrain)?world.terrain:[world.terrain];for(let i=0;i<terrains.length;i++){if(!terrains[i])continue;$('status').textContent=`Loading terrain ${i+1} / ${terrains.length}…`;await loadTerrain(terrains[i]);} const anchor=world.actors.find(a=>a.type==='penguin'); const spawn=world.spawn??(anchor?[anchor.position[0]+8,anchor.position[1],anchor.position[2]+8]:[0,100,0]); if(Number.isFinite(world.viewYaw))yaw=world.viewYaw; if(Number.isFinite(world.viewPitch))pitch=THREE.MathUtils.clamp(world.viewPitch,-1.2,1.2); world.actors.unshift({id:'player',type:'human',asset:'/Human_Animated.glb',position:spawn,scale:1,clip:'Human_Idle'});const loader=new GLTFLoader(),assets=new Map();for(const [i,data] of world.actors.entries()){$('status').textContent=`Loading wildlife ${i+1} / ${world.actors.length}…`;if(!assets.has(data.asset))assets.set(data.asset,await loader.loadAsync(data.asset));const gltf=assets.get(data.asset),model=clone(gltf.scene);model.traverse(o=>{if(/icosphere/i.test(o.name))o.visible=false;});const root=new THREE.Group();root.add(model);root.position.fromArray(data.position);root.rotation.y=data.rotation||0;root.scale.setScalar(data.scale??1);scene.add(root);const a={...data,age:0,root,clips:gltf.animations,mixer:new THREE.AnimationMixer(model),origin:new THREE.Vector3().fromArray(data.position),target:data.target?new THREE.Vector3().fromArray(data.target):null};actors.push(a);const clip=THREE.AnimationClip.findByName(a.clips,data.clip)||a.clips[0];if(clip){a.mixer.clipAction(clip).play();a.clip=clip.name;a.mixer.update(0);}if(a.ground)groundAnimal(a);if(['cabin','village'].includes(a.type))cameraObstacles.push(new THREE.Box3().setFromObject(root));register(a);if(a.type==='human'){player=a;const h=surface.height(a.root.position.x,a.root.position.z);if(h!==null)a.root.position.y=h;}}
+async function init(){const response=await fetch('/viewer/data/world.json');if(!response.ok)throw new Error(`World manifest: HTTP ${response.status}`);const world=await response.json();const terrains=Array.isArray(world.terrain)?world.terrain:[world.terrain];for(let i=0;i<terrains.length;i++){if(!terrains[i])continue;$('status').textContent=`Loading terrain ${i+1} / ${terrains.length}…`;await loadTerrain(terrains[i]);} const anchor=world.actors.find(a=>a.type==='penguin'); const spawn=world.spawn??(anchor?[anchor.position[0]+8,anchor.position[1],anchor.position[2]+8]:[0,100,0]); if(Number.isFinite(world.viewYaw))yaw=world.viewYaw; if(Number.isFinite(world.viewPitch))pitch=THREE.MathUtils.clamp(world.viewPitch,-1.2,1.2); world.actors.unshift({id:'player',type:'human',asset:'/Human_Animated.glb',position:spawn,rotation:yaw,scale:1,clip:'Human_Idle'});const loader=new GLTFLoader(),assets=new Map();for(const [i,data] of world.actors.entries()){$('status').textContent=`Loading wildlife ${i+1} / ${world.actors.length}…`;if(!assets.has(data.asset))assets.set(data.asset,await loader.loadAsync(data.asset));const gltf=assets.get(data.asset),model=clone(gltf.scene);model.traverse(o=>{if(/icosphere/i.test(o.name))o.visible=false;});const root=new THREE.Group();root.add(model);root.position.fromArray(data.position);root.rotation.y=data.rotation||0;root.scale.setScalar(data.scale??1);scene.add(root);const a={...data,age:0,root,clips:gltf.animations,mixer:new THREE.AnimationMixer(model),origin:new THREE.Vector3().fromArray(data.position),target:data.target?new THREE.Vector3().fromArray(data.target):null};actors.push(a);const clip=THREE.AnimationClip.findByName(a.clips,data.clip)||a.clips[0];if(clip){a.mixer.clipAction(clip).play();a.clip=clip.name;a.mixer.update(0);}if(a.ground)groundAnimal(a);if(['cabin','village'].includes(a.type))cameraObstacles.push(new THREE.Box3().setFromObject(root));register(a);if(a.type==='human'){player=a;const h=surface.height(a.root.position.x,a.root.position.z);if(h!==null)a.root.position.y=h;}}
 scene.updateMatrixWorld(true);
 scene.matrixWorldAutoUpdate=false;
 for(const a of actors){
@@ -103,6 +103,7 @@ for(const a of actors){
   a.renderRadius=box.getSize(new THREE.Vector3()).length()*.5+box.getCenter(new THREE.Vector3()).distanceTo(a.root.position);
   a.animationElapsed=0;
 }
+updateFootprints=createFootprints(scene,surface,player,terrainMeshes);
 ready=true;
 $('status').textContent='Your expedition begins here.';
 $('play').disabled=false;
@@ -145,6 +146,7 @@ function frame(){
       }
       if(locked&&!scenery)a.root.updateMatrixWorld(true);
     }
+    if(locked){updateFootContact(player,dt);updateFootprints();}
     updateCamera();
   }
   ocean.visible=camera.position.y>=0;

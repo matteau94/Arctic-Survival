@@ -15,6 +15,11 @@ WASD or arrow keys move relative to your facing direction; Shift runs and holdin
 C crouches. Press Esc to pause and release the cursor, then click **Resume
 expedition** to continue. Pausing freezes movement, animal AI, and animations.
 Animation clips switch automatically. The world has no animal selection menu.
+The survivor's step cadence follows movement speed. Boot contact adapts to slopes,
+and sampled sole contact presses geometric heel/toe depressions into a local snow
+mesh in any pose. The depth map is bounded and repeated contact cannot deepen a
+hole indefinitely. Turning in place uses short steps while the body follows the
+camera smoothly, then settles back to idle.
 
 The corner FPS counter shows the measured frame rate. Rendering starts at native
 CSS-pixel resolution and lowers resolution while playing if frame times are high.

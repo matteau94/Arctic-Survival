@@ -44,6 +44,8 @@ async function load(file) {
   camera.position.set(0,3,0);camera.lookAt(10,1,0);camera.updateMatrixWorld();
   player.root.position.set(0,1,0);
   game.updateGame(.1,new Set(),camera);
+  assert.equal(player.state,'Turning');assert.equal(player.clip,'Walk');
+  for(let i=0;i<60;i++)game.updateGame(1/30,new Set(),camera);
   facing(1,0);assert.equal(player.clip,'Idle');near(player.root.position.lengthSq(),1,'idle position');
   for(const [key,x,z] of [['KeyW',2.2352,0],['KeyS',-2.2352,0],['KeyA',0,-2.2352],['KeyD',0,2.2352],['ArrowUp',2.2352,0],['ArrowDown',-2.2352,0],['ArrowLeft',0,-2.2352],['ArrowRight',0,2.2352]]){
     player.root.position.set(0,1,0);
@@ -52,8 +54,9 @@ async function load(file) {
     facing(1,0);assert.equal(player.clip,'Walk');
   }
   camera.lookAt(-10,1,0);camera.updateMatrixWorld();
-  game.updateGame(.1,new Set(),camera);facing(-1,0);
+  for(let i=0;i<60;i++)game.updateGame(1/30,new Set(),camera);facing(-1,0);
   camera.position.set(0,3,10);camera.lookAt(0,1,0);camera.updateMatrixWorld();
+  for(let i=0;i<60;i++)game.updateGame(1/30,new Set(),camera);
   player.root.position.set(0,1,-199.9);
   game.updateGame(1,new Set(['KeyW']),camera);assert.equal(player.root.position.z,-199.9);assert.equal(player.clip,'Idle');
   player.root.position.set(0,1,0);
