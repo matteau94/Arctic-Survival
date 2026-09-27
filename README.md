@@ -37,6 +37,5 @@ Open http://127.0.0.1:8765. Run `npm run build` to validate the assets and gener
 the same `dist` directory used by Vercel. No npm dependencies are required.
 
 Models are large, so the first visit may load slowly and consume substantial
-bandwidth. This deployment publishes the existing explorer, including its
-scripted wildlife behavior. See [viewer/README.md](viewer/README.md) for controls
+bandwidth. This deployment publishes the playable human and autonomous wildlife. Run `npm test` for gameplay checks. See [viewer/README.md](viewer/README.md) for controls
 and instructions for re-exporting the scene from Blender.
