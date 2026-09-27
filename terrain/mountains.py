@@ -426,6 +426,42 @@ def _nunataks(X, Y, seed):
     return out
 
 
+def _coastal_relief(X, Y, land):
+    """Broken coastal spurs, including a readable skyline around the arrival valley.
+
+    Coordinates are world metres, never chunk-relative. Broad compact supports
+    taper the local spurs into regional terrain without a circular rim or wall.
+    Valley/river carving still runs after this additive field in world.height.
+    """
+    x = X - SPAWN[0]; y = Y - SPAWN[1]
+    result = np.zeros_like(X, dtype=np.float64)
+    # centre offsets, crest direction, along/across support, peak addition.
+    for cx, cy, angle, length, width, amplitude in (
+        (-3300., 1700., 1.05, 6500., 2300., 1150.),
+        (2200., 4300., -0.35, 5100., 2100., 1050.),
+        (-1800., -4400., -0.65, 5800., 2500., 950.),
+    ):
+        dx = x - cx; dy = y - cy
+        ca, sa = np.cos(angle), np.sin(angle)
+        u = ca * dx + sa * dy
+        v = -sa * dx + ca * dy
+        v += 330.0 * _fbm(X, Y, SEED + 1801, 1 / 2200., 2)
+        taper = 1.0 - _sstep(0.25, 1.0, np.abs(u) / length)
+        flank = np.maximum(1.0 - np.abs(v) / width, 0.0) ** 1.35
+        saddles = 0.78 + 0.22 * _pn(X, Y, SEED + 1802, 1 / 1700.)
+        result = np.maximum(result, amplitude * taper * flank * saddles)
+    # Regional foothills have irregular, warped crests and spacious low areas.
+    wx = X + 2200.0 * _fbm(X, Y, SEED + 1810, 1 / 17000., 2)
+    wy = Y + 2200.0 * _fbm(X, Y, SEED + 1811, 1 / 17000., 2)
+    gate = _sstep(-0.12, 0.4, _pn(X, Y, SEED + 1812, 1 / 65000.))
+    ridge = np.maximum(1.0 - np.abs(_pn(wx, wy, SEED + 1813, 1 / 7200.)) * 2.8, 0.0) ** 2
+    regional = 460.0 * gate * ridge
+    # Leave an open arrival basin; the apron reaches full relief before the
+    # nearby crests, with a smooth slope rather than a flattened circular edge.
+    apron = _sstep(550.0, 1900.0, np.hypot(x, y))
+    return np.maximum(result, regional) * apron * _sstep(0.25, 1.0, land)
+
+
 def height(X, Y, land):
     X = np.asarray(X, dtype=np.float64); Y = np.asarray(Y, dtype=np.float64)
     shape = X.shape
@@ -434,11 +470,12 @@ def height(X, Y, land):
         return out.reshape(shape)
     Xf = X.ravel(); Yf = Y.ravel()
     lf = np.broadcast_to(np.asarray(land, dtype=np.float64), shape).ravel()
+    coastal = _coastal_relief(Xf, Yf, lf)
     F = _lattice(X if X.ndim == 2 else Xf, Y if Y.ndim == 2 else Yf, _macro)
     fade = _sstep(0.0, 1.0, lf.astype(np.float32))
     act = ((F[:, _F_AMP] > 1.0) | (F[:, _F_ND] > 1e-3)) & (fade > 0)
     if not act.any():
-        return out.reshape(shape)
+        return coastal.reshape(shape)
     if act.all():
         idx = slice(None); n = X.size
     else:
@@ -475,7 +512,7 @@ def height(X, Y, land):
         hm[nm] = np.maximum(hm[nm], nun)
 
     out[idx] = hm * fade[idx]
-    return out.reshape(shape)
+    return np.maximum(out, coastal).reshape(shape)
 
 
 def range_name(x, y):

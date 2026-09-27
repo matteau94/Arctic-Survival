@@ -22,13 +22,8 @@ Everything is a pure vectorised function of world metres; the heavy inputs (vall
 coast_distance) are LRU-cached by their owners for the same grid, so carve() costs ~20-40 ms per
 257^2 chunk.
 
-chunk_objects(): the terrain grid is 100 m (LOD0) .. 400 m (LOD2), i.e. a 60-400 m river is only
-0-4 vertices wide and the vertex-colour 'ice' mask alone renders as a fuzzy blue smear. So for
-LOD <= RIBBON_MAX_LOD we add ONE merged "RiverIce" mesh per chunk: the terrain grid cells that
-touch river/lake ice, lifted RIBBON_LIFT above the terrain faces (same quad split). Per-vertex
-attributes carry the *signed* across-channel distance and half-width, which are near-linear, so
-the shader reconstructs a crisp sub-cell ice outline (alpha-clipped) plus glossy blue ice,
-Voronoi pressure-ridge cracks and drifted snow. Distant chunks rely on the terrain 'ice' mask.
+chunk_objects() clips terrain triangles to the river footprint before exporting.
+POINT color attributes provide shader-independent ice colors and exporter surf weights.
 """
 import math
 import numpy as np
@@ -71,7 +66,7 @@ DRIFT_AMOUNT = 0.35                   # max fraction of ice covered by drifted s
 ACTIVE_TOL = 1.5                      # m: ice only where the final surface is at river level
 MIN_LEVEL = SEA_LEVEL + 0.6           # river ice never below this (coast() floods below)
 # ribbon mesh
-RIBBON_MAX_LOD = 1
+RIBBON_MAX_LOD = 2
 RIBBON_LIFT = 0.3
 RIBBON_MAT = "River_Ice"
 
@@ -235,6 +230,18 @@ def _fields(X, Y, land=None):
     tlvl = np.maximum(v['floor_minor'] - tbh, MIN_LEVEL)
     on_t = onland * _ss(0.0, 5.0, tw)
 
+    # A persistent coastal drainage corridor, in world coordinates (never chunk seeded).
+    # Crosses within 1-3 km of the coastal spawn and continues inland and seaward.
+    u = X - 1961940.0
+    cy = 752276.0 + 1900.0 + 650.0 * np.sin(u / 3600.0) + 220.0 * np.sin(u / 1300.0)
+    derivative = 650.0 / 3600.0 * np.cos(u / 3600.0) + 220.0 / 1300.0 * np.cos(u / 1300.0)
+    csd = (Y - cy) / np.sqrt(1.0 + derivative ** 2)
+    cw = 250.0 + 55.0 * np.sin(u / 2700.0 + 0.8)
+    # Fade the source over 12 km; no abrupt cap at a chunk boundary.
+    con = _ss(-90000.0, -78000.0, u) * (1.0 - _ss(65000.0, 80000.0, u)) * _ss(300.0, 1800.0, s)
+    center_s = ocean.coast_distance(X, cy)
+    clvl = np.maximum(MIN_LEVEL, 0.012 * np.maximum(center_s, 0.0) + 8.0)
+
     # ---- lakes
     lakes = _lakes_in(X.min(), X.max(), Y.min(), Y.max())
     lf = np.full(X.shape, 1e9); llv = np.zeros(X.shape)
@@ -246,7 +253,8 @@ def _fields(X, Y, land=None):
             lf = np.where(sel, f, lf); llv = np.where(sel, lv, llv)
     F = dict(sd=sd, hw=hw * on_r, bh=bh, bw=bw, lvl=lvl, on_r=on_r,
              tsd=tsd, tw=tw * on_t, tbw=tbw, tlvl=tlvl, on_t=on_t,
-             lf=lf, llv=llv, onland=onland, lakes=lakes)
+             lf=lf, llv=llv, onland=onland, lakes=lakes,
+             csd=csd, cw=cw, con=con, clvl=clvl)
     _CACHE.insert(0, (k, F))
     del _CACHE[_CACHE_N:]
     return F
@@ -270,6 +278,8 @@ def carve(X, Y, h, land):
     out = out + (np.minimum(out, F['lvl']) - out) * pr
     if F['lakes']:
         out = out + (np.minimum(out, F['llv']) - out) * pl
+    pc = (1.0 - _ss(F['cw'], F['cw'] + 360.0, np.abs(F['csd']))) * F['con']
+    out += (np.minimum(out, F['clvl']) - out) * pc
     return out
 
 
@@ -285,7 +295,10 @@ def _coverage(F, H, spacing):
     if F['lakes']:
         cl = (1.0 - _ss(-a, a, F['lf'])) * (1.0 - _ss(ACTIVE_TOL, 2 * ACTIVE_TOL, np.abs(H - F['llv'])))
         cov = np.maximum(cov, cl)
-    return cov * F['onland'] * _ss(SEA_LEVEL + 0.3, SEA_LEVEL + 0.8, H)
+    cc = (1.0 - _ss(-a, a, np.abs(F['csd']) - F['cw'])) * F['con']
+    cc *= 1.0 - _ss(ACTIVE_TOL, 2 * ACTIVE_TOL, np.abs(H - F['clvl']))
+    cov = np.maximum(cov * F['onland'], cc)
+    return cov * _ss(SEA_LEVEL + 0.3, SEA_LEVEL + 0.8, H)
 
 
 def surface(X, Y, H, land, masks):
@@ -456,70 +469,93 @@ def material():
     return M.get_or_create(RIBBON_MAT, _build_material)
 
 
+def ribbon_geometry(ctx):
+    """Pure numeric clipped geometry, following the terrain's exact quad triangulation.
+
+    The signed union footprint is interpolated on each triangle. This avoids exporting
+    invisible alpha-masked terrain quads. Coordinates are chunk local; borders retain
+    their exact positions. Narrow distant tributaries can disappear below grid resolution.
+    """
+    F = _ribbon_fields(ctx)
+    H = ctx.H
+    def active(distance, level, gate):
+        return np.maximum.reduce((distance, np.abs(H - level) - 2 * ACTIVE_TOL,
+                                  (0.99 - gate) * 1000.0, SEA_LEVEL + 0.8 - H))
+    footprint = np.minimum.reduce((
+        active(np.abs(F['sd']) - F['hw'], F['lvl'], F['on_r']),
+        active(np.abs(F['tsd']) - F['tw'], F['tlvl'], F['on_t']),
+        active(F['lf'], F['llv'], F['onland']),
+        active(np.abs(F['csd']) - F['cw'], F['clvl'], F['con'])))
+    inside = footprint < 0
+    cell = inside[:-1, :-1] | inside[1:, :-1] | inside[:-1, 1:] | inside[1:, 1:]
+    # Blender can choose either diagonal on a non-planar quad. Match the
+    # actual terrain triangles so the lifted ribbon never cuts through a bank.
+    terrain = ctx.extra.get('terrain_object')
+    tessellation = None
+    if terrain is not None:
+        terrain.data.calc_loop_triangles()
+        tessellation = np.empty(len(terrain.data.loop_triangles) * 3, dtype=np.int32)
+        terrain.data.loop_triangles.foreach_get('vertices', tessellation)
+        tessellation = tessellation.reshape(-1, 3)
+    verts, faces = [], []
+    for j, i in zip(*np.nonzero(cell)):
+        ids = ((j, i), (j, i+1), (j+1, i+1), (j+1, i))
+        points = [np.array((ctx.X[q]-ctx.origin[0], ctx.Y[q]-ctx.origin[1], H[q]+RIBBON_LIFT,
+                            footprint[q]), dtype=float) for q in ids]
+        triangles = ((0, 1, 2), (0, 2, 3))
+        if tessellation is not None:
+            face = j * (ctx.res - 1) + i
+            corners = {row * ctx.res + col: k for k, (row, col) in enumerate(ids)}
+            triangles = [tuple(corners[int(v)] for v in t)
+                         for t in tessellation[2*face:2*face+2]]
+        for tri in triangles:
+            poly = [points[k] for k in tri]
+            clipped = []
+            for a, b in zip(poly, poly[1:]+poly[:1]):
+                if a[3] <= 0:
+                    clipped.append(a)
+                if (a[3] < 0) != (b[3] < 0):
+                    clipped.append(a + (b-a) * (a[3] / (a[3]-b[3])))
+            if len(clipped) < 3:
+                continue
+            start = len(verts)
+            verts.extend(v[:3] for v in clipped)
+            faces.extend((start, start+k, start+k+1) for k in range(1, len(clipped)-1))
+    return np.asarray(verts, dtype=np.float64).reshape(-1, 3), faces
+
+
 def chunk_objects(ctx):
     if ctx.lod > RIBBON_MAX_LOD:
         return []
+    co, faces = ribbon_geometry(ctx)
+    if not len(co):
+        return []
     import bpy
-    F = _ribbon_fields(ctx)
-    H = ctx.H
-    res = ctx.res
-    sp = ctx.size / (res - 1)
-    cov = _coverage(F, H, 2.0 * sp)             # generous: which vertices touch ice
-    if not (cov > 0.01).any():
-        return []
-    # cells whose 4 corners have any coverage (plus 1-cell dilation for the sub-cell outline)
-    c = cov > 0.01
-    cell = c[:-1, :-1] | c[1:, :-1] | c[:-1, 1:] | c[1:, 1:]
-    d = cell.copy()
-    d[1:, :] |= cell[:-1, :]; d[:-1, :] |= cell[1:, :]
-    d[:, 1:] |= cell[:, :-1]; d[:, :-1] |= cell[:, 1:]
-    cell = d
-    rr, cc = np.nonzero(cell)
-    if not len(rr):
-        return []
-    i0 = rr * res + cc
-    quads = np.stack([i0, i0 + 1, i0 + res + 1, i0 + res], axis=1)
-    used, inv = np.unique(quads.ravel(), return_inverse=True)
-    loops = inv.astype(np.int32)
-    t = np.arange(res, dtype=np.float64) * sp
-    ly, lx = np.divmod(used, res)
-    co = np.empty((len(used), 3), np.float32)
-    co[:, 0] = t[lx]; co[:, 1] = t[ly]; co[:, 2] = H.ravel()[used] + RIBBON_LIFT
-
-    # per-vertex outline fields; inactive river parts get a huge negative half-width -> no ice
-    act_r = (np.abs(H - F['lvl']) < 2 * ACTIVE_TOL) & (H > SEA_LEVEL + 0.5)
-    act_t = (np.abs(H - F['tlvl']) < 2 * ACTIVE_TOL) & (H > SEA_LEVEL + 0.5)
-    act_l = (np.abs(H - F['llv']) < 2 * ACTIVE_TOL) & (H > SEA_LEVEL + 0.5)
-    hw = np.where(act_r, F['hw'], -60.0)
-    tw = np.where(act_t, F['tw'], -60.0)
-    lf = np.where(act_l, F['lf'], 60.0 + np.maximum(F['lf'], 0.0))
-    drift = _waves(ctx.X, ctx.Y, S0 + 50, DRIFT_WL[0], DRIFT_WL[1], 7)
-    A = np.stack([F['sd'], hw, F['tsd'], tw], -1).reshape(-1, 4)[used].astype(np.float32)
-    B = np.stack([np.clip(lf, -1e4, 1e4), 0.3 * drift, np.zeros_like(lf), np.ones_like(lf)],
-                 -1).reshape(-1, 4)[used].astype(np.float32)
-
     name = f"RiverIce_{ctx.cx}_{ctx.cy}"
     me = bpy.data.meshes.new(name)
-    me.vertices.add(len(used))
-    me.attributes['position'].data.foreach_set('vector', co.ravel())
-    me.loops.add(len(loops))
-    me.attributes['.corner_vert'].data.foreach_set('value', loops)
-    me.polygons.add(len(quads))
-    me.polygons.foreach_set('loop_start', np.arange(0, 4 * len(quads), 4, dtype=np.int32))
-    me.update(calc_edges=True)
-    for nm, arr in (('rv_a', A), ('rv_b', B)):
-        a = me.attributes.new(nm, 'FLOAT_COLOR', 'POINT')
-        a.data.foreach_set('color', arr.ravel())
-    me.shade_smooth()
-    me.materials.append(material())
+    me.from_pydata(co.tolist(), [], faces)
+    me.update()
+    X, Y = co[:, 0] + ctx.origin[0], co[:, 1] + ctx.origin[1]
+    drift = 0.16 * _ss(-0.3, 0.6, _waves(X, Y, S0 + 50, 300.0, 1500.0, 5))
+    weights = np.stack((drift, np.zeros_like(drift), 1-drift, np.zeros_like(drift)), -1)
+    rgb = drift[:, None]*np.array([0.84, 0.91, 0.95]) + (1-drift[:, None])*np.array([0.20, 0.49, 0.64])
+    colors = np.column_stack((rgb, np.ones(len(co))))
+    for nm, data in (('surf', weights), ('display_color', colors)):
+        attr = me.color_attributes.new(name=nm, type='FLOAT_COLOR', domain='POINT')
+        attr.data.foreach_set('color', data.astype(np.float32).ravel())
+    mat = bpy.data.materials.get('River_Ice_Clipped')
+    if mat is None:
+        mat = bpy.data.materials.new('River_Ice_Clipped')
+        mat.use_nodes = True
+        mat.diffuse_color = (0.20, 0.49, 0.64, 1)
+        bsdf = mat.node_tree.nodes.get('Principled BSDF')
+        attr = mat.node_tree.nodes.new('ShaderNodeVertexColor')
+        attr.layer_name = 'display_color'
+        mat.node_tree.links.new(attr.outputs['Color'], bsdf.inputs['Base Color'])
+        bsdf.inputs['Roughness'].default_value = 0.24
+        bsdf.inputs['IOR'].default_value = 1.31
+    me.materials.append(mat)
     ob = bpy.data.objects.new(name, me)
-    ox = math.fmod(ctx.origin[0], 8 * CHUNK_SIZE); oy = math.fmod(ctx.origin[1], 8 * CHUNK_SIZE)
-    ob["ice_offset"] = (ox, oy, 0.0)
-    try:
-        ob.visible_shadow = False
-    except Exception:
-        pass
-    if ctx.collection is not None:
-        ctx.collection.objects.link(ob)
+    (ctx.collection or bpy.context.scene.collection).objects.link(ob)
     ob.parent = ctx.root
     return [ob]

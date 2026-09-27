@@ -1,11 +1,13 @@
-"""Small deterministic, world-coordinate terrain relief layer.
+"""Deterministic, world-coordinate rolling foothills and regional relief.
 
 Registration point: add ``chunk_variation.height_delta(X, Y, land)`` to ``h`` in
-``terrain.world.height`` after the existing feature pipeline. This file is standalone.
+``terrain.world.height`` before valley, river, and coast carving.
 """
 import numpy as np
 
 from .config import CONTINENT_RADIUS, WORLD_RADIUS
+from .config import SEED
+from .mountains import _fbm, _sstep
 
 # Incommensurate directions and metre-scale spatial frequencies avoid a short
 # repeating chunk template. Components span regional undulation to local ridges.
@@ -27,14 +29,21 @@ def _field(X, Y):
             freq * (np.cos(angle) * X + np.sin(angle) * Y), 2.0 * np.pi
         )
         result += amplitude * np.sin(phase)
-    return result
+    # Noise uses an arithmetic hash, so this layer has no 256-cell permutation
+    # repeat. Wavelengths are resolvable by the near 100 m terrain mesh.
+    regional = _fbm(X, Y, SEED + 1900, 1 / 42000.0, 3)
+    wx = X + 1600.0 * _fbm(X, Y, SEED + 1901, 1 / 14000.0, 2)
+    wy = Y + 1600.0 * _fbm(X, Y, SEED + 1902, 1 / 14000.0, 2)
+    hills = _fbm(wx, wy, SEED + 1903, 1 / 3800.0, 3)
+    strength = 0.35 + 0.65 * _sstep(-0.25, 0.35, regional)
+    return result + 210.0 * regional + 260.0 * strength * hills
 
 
 def height_delta(X, Y, land):
     """Return seamless deterministic relief in metres for broadcastable world arrays.
 
-    Relief peaks around 25 m before land weighting, adding gentle roll to the ice
-    sheet and moderate texture across mountain/valley terrain. It smoothly fades
+    Regional swells and kilometre-scale foothills add tens to hundreds of metres
+    of relief before the downstream valley and frozen-river carving. It fades
     offshore toward the playable world's outer edge. Identical world coordinates
     always produce identical values, independent of chunk or evaluation order.
     """
@@ -50,7 +59,7 @@ def height_delta(X, Y, land):
     )
     offshore_fade = t * t * (3.0 - 2.0 * t)
     # Fractional land masks soften the coastal transition; full land retains relief.
-    return _field(X, Y) * (0.25 + 0.75 * land) * offshore_fade
+    return _field(X, Y) * _sstep(0.25, 1.0, land) * offshore_fade
 
 
 def diagnose_chunk_matrix(cx0=-2, cy0=-2, width=5, chunk_size=None):

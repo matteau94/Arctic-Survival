@@ -121,9 +121,10 @@ def make_player(scene, spawn, offset):
     scene.collection.objects.link(cam)
     cam.parent = p
     cam.location = (0.0, 0.0, S.EYE_HEIGHT)
-    # look "outward" (towards the coast / ocean) with a slight downward tilt
-    dx, dy = spawn
+    # Face the nearby north-west ridge above the arrival valley.
+    dx, dy = -2200.0, 3300.0
     yaw = math.atan2(-dx, dy) if (dx or dy) else 0.0
+    scene['terrain_view_yaw'] = math.atan2(dx, -dy)  # viewer uses Y-up / -world-Y
     cam.rotation_euler = (math.radians(87.0), 0.0, yaw)
     scene.camera = cam
     return p, cam

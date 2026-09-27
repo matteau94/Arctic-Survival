@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node --experimental-vm-modules scripts/test-gameplay.cjs",
+    "test": "node --experimental-vm-modules scripts/test-gameplay.cjs && node --experimental-vm-modules scripts/test-terrain-render.cjs",
     "build": "node scripts/build-site.cjs",
     "start": "node viewer/server.cjs"
   }

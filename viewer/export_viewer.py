@@ -57,11 +57,18 @@ for ob in scene.objects:
     norm=norm@np.linalg.inv(matrix[:3,:3]); norm/=np.maximum(np.linalg.norm(norm,axis=1)[:,None],1e-8)
     p=p[:,[0,2,1]].copy(); p[:,2]*=-1
     norm=norm[:,[0,2,1]].copy(); norm[:,2]*=-1
+    display=me.color_attributes.get('display_color')
     surf=me.color_attributes.get('surf')
-    if surf and surf.domain=='POINT':
+    if display and display.domain=='POINT':
+        rgba=np.empty(n*4,dtype=np.float32)
+        display.data.foreach_get('color',rgba)
+        color=np.clip(rgba.reshape(-1,4)[:,:3],0,1)
+    elif surf and surf.domain=='POINT':
         weights=np.empty(n*4,dtype=np.float32); surf.data.foreach_get('color',weights)
         weights=weights.reshape(-1,4)
-        palette=np.array([[.84,.91,.95],[.22,.27,.31],[.38,.68,.78],[.07,.13,.18]],dtype=np.float32)
+        weights=np.clip(weights,0,1)
+        weights/=np.maximum(weights.sum(axis=1,keepdims=True),1e-6)
+        palette=np.array([[.79,.86,.91],[.055,.066,.08],[.12,.42,.58],[.035,.085,.12]],dtype=np.float32)
         color=weights@palette
     else:
         material=me.materials[0] if me.materials else None
@@ -77,6 +84,7 @@ with open(os.path.join(OUT,'terrain.bin'),'wb') as f:
 player=bpy.data.objects.get('Player')
 manifest=dict(terrain=[dict(file='terrain.bin',name='Arctic terrain',vertexCount=base,indexCount=len(arrays[3]))],
               actors=actors,spawn=yup(player.matrix_world.translation) if player else [0,100,0],
-              units='metres',chunkCount=25)
+              units='metres',chunkCount=sum(1 for ob in scene.objects if ob.name.startswith('Chunk_')),
+              viewYaw=float(scene.get('terrain_view_yaw',0)),viewPitch=-.10)
 with open(os.path.join(OUT,'world.json'),'w') as f: json.dump(manifest,f)
 print('VIEWER_EXPORT',len(actors),'actors',base,'vertices')

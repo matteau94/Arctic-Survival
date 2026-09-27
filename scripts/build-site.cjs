@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'dist');
-const files = new Set(['viewer/index.html', 'viewer/app.js', 'viewer/gameplay.js', 'viewer/terrain.mjs', 'Human_Animated.glb', 'viewer/data/world.json']);
+const files = new Set(['viewer/index.html', 'viewer/app.js', 'viewer/gameplay.js', 'viewer/terrain.mjs', 'viewer/terrain-render.js', 'Human_Animated.glb', 'viewer/data/world.json']);
 const world = JSON.parse(fs.readFileSync(path.join(root, 'viewer/data/world.json'), 'utf8'));
 
 function addDirectory(relative) {
