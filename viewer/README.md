@@ -7,6 +7,21 @@ Open http://127.0.0.1:8765 while the Node server is running.
 To restart from the project directory: `node viewer/server.cjs`.
 
 Click **Enter world** to control the human survivor and lock the mouse cursor.
+Press **E** or click **Inventory [E]** to open the climber's backpack. It holds
+up to 24 stacks and 20 kg, begins with basic expedition supplies, and saves its
+contents in this browser. Select an item to inspect it; discarding requires
+confirmation and permanently removes one item. Inventory pauses the expedition
+and releases the cursor. Close it with **E**, **Esc**, or **Close**, then click
+**Resume expedition** to continue.
+
+You start with a small tent and sleeping bag. Select either in **Inventory**,
+then **Place on ground**. Look and move to position the preview in front of you,
+press **R** to rotate, and click when it is green to place. **Esc** cancels without
+using the item. Placement needs dry, clear, gently sloping ground; a sleeping bag
+can fit inside the tent. Placement removes one item from the backpack and saves
+the campsite together with inventory in this browser. Older inventory saves get
+the camping kit once; if that exceeds capacity, remove items before adding more.
+Sleeping effects, packing up, consuming supplies, and gathering are not implemented.
 Move the mouse to turn the survivor and look up or down. A centered third-person
 camera follows behind the character, similar to Minecraft's rear third-person
 view, and moves closer when terrain or buildings obstruct it.

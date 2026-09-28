@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { createTerrainTiles, createTerrainMaterial } from './terrain-render.js';
 import { surface, register, updateGame, updateFootContact } from './gameplay.js';
 import { createFootprints } from './footprints.js';
+import { createInventory } from './inventory.js';
+import { createInventoryUI } from './inventory-ui.js';
+import { createCamping } from './camping.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 const $ = id => document.getElementById(id);
@@ -14,7 +17,17 @@ scene.add(new THREE.HemisphereLight(0xdff5ff,0x485263,1.05));
 const sun = new THREE.DirectionalLight(0xfff4df,2.5);sun.position.set(-8000,4500,6000);scene.add(sun);
 const ocean=new THREE.Mesh(new THREE.PlaneGeometry(1000000,1000000),new THREE.MeshStandardMaterial({color:0x247993,transparent:true,opacity:.4,roughness:.3,depthWrite:false,side:THREE.DoubleSide}));ocean.rotation.x=-Math.PI/2;scene.add(ocean);
 const actors=[],terrainMeshes=[],cameraObstacles=[],keys=new Set();
-let player=null,ready=false,locked=false,yaw=0,pitch=-.18,updateFootprints=null;
+let player=null,ready=false,locked=false,yaw=0,pitch=-.18,updateFootprints=null,camping=null;
+const inventory=createInventory();
+const inventoryUI=createInventoryUI({inventory,onOpen:()=>{
+  camping?.cancel();
+  release();$('start').hidden=true;
+},onClose:()=>{
+  release();$('play').focus();
+},onPlace:id=>{
+  camping?.begin(id);lockPointer();
+}});
+inventoryUI.setEnabled(false);
 const aim=new THREE.Vector3(),look=new THREE.Vector3(),offset=new THREE.Vector3(),cameraProbe=new THREE.Vector3();
 const cameraRay=new THREE.Raycaster();
 function updateCamera(){
@@ -42,15 +55,18 @@ function captureFailed(){
   $('play').textContent='Retry mouse capture';
 }
 async function lockPointer(){
-  if(!ready)return;
+  if(!ready||inventoryUI.isOpen())return;
   try{await renderer.domElement.requestPointerLock();}
   catch{captureFailed();}
 }
 $('play').onclick=lockPointer;
-renderer.domElement.addEventListener('click',lockPointer);
+renderer.domElement.addEventListener('click',()=>{
+  if(locked&&camping?.active())camping.place();else lockPointer();
+});
 document.addEventListener('pointerlockchange',()=>{
   locked=document.pointerLockElement===renderer.domElement;keys.clear();
-  $('start').hidden=locked;$('crosshair').hidden=!locked;
+  if(inventoryUI.isOpen()&&locked){document.exitPointerLock();locked=false;}
+  $('start').hidden=locked||inventoryUI.isOpen();$('crosshair').hidden=!locked;
   if(!locked&&ready){$('status').textContent='Expedition paused';$('play').textContent='Resume expedition';}
 });
 document.addEventListener('pointerlockerror',captureFailed);
@@ -59,14 +75,25 @@ document.addEventListener('mousemove',event=>{
   yaw-=event.movementX*.002;pitch=THREE.MathUtils.clamp(pitch-event.movementY*.002,-1.2,1.2);
 });
 window.addEventListener('keydown',event=>{
-  if(event.code==='Escape'){release();return;}
+  if(event.code==='KeyE'&&ready&&!event.repeat){
+    event.preventDefault();
+    if(inventoryUI.isOpen())inventoryUI.close();
+    else inventoryUI.open();
+    return;
+  }
+  if(inventoryUI.isOpen()){
+    if(event.code==='Escape'){event.preventDefault();inventoryUI.close();}
+    return;
+  }
+  if(event.code==='Escape'){camping?.cancel();release();return;}
   if(!locked)return;
+  if(event.code==='KeyR'&&camping?.active()&&!event.repeat){event.preventDefault();camping.rotate();return;}
   if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight','KeyC'].includes(event.code)){event.preventDefault();keys.add(event.code);}
 });
 window.addEventListener('keyup',event=>keys.delete(event.code));
 function release(){
   keys.clear();locked=false;
-  if(ready){$('start').hidden=false;$('crosshair').hidden=true;$('status').textContent='Expedition paused';$('play').textContent='Resume expedition';}
+  if(ready){$('start').hidden=inventoryUI.isOpen();$('crosshair').hidden=true;$('status').textContent='Expedition paused';$('play').textContent='Resume expedition';}
   if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();
 }
 window.addEventListener('blur',release);
@@ -104,7 +131,10 @@ for(const a of actors){
   a.animationElapsed=0;
 }
 updateFootprints=createFootprints(scene,surface,player,terrainMeshes);
+camping=createCamping({scene,surface,inventory,getPlayer:()=>player,getYaw:()=>yaw,obstacles:cameraObstacles});
 ready=true;
+player.inventory=inventory;
+inventoryUI.setEnabled(true);
 $('status').textContent='Your expedition begins here.';
 $('play').disabled=false;
 $('play').textContent='Enter world';
@@ -148,6 +178,7 @@ function frame(){
     }
     if(locked){updateFootContact(player,dt);updateFootprints();}
     updateCamera();
+    if(locked)camping?.update();
   }
   ocean.visible=camera.position.y>=0;
   renderer.render(scene,camera);

@@ -5,6 +5,7 @@ const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'dist');
 const files = new Set(['viewer/index.html', 'viewer/app.js', 'viewer/gameplay.js', 'viewer/footprints.js', 'viewer/snow-impressions.js', 'viewer/terrain.mjs', 'viewer/terrain-render.js', 'Human_Animated.glb', 'viewer/data/world.json']);
 const world = JSON.parse(fs.readFileSync(path.join(root, 'viewer/data/world.json'), 'utf8'));
+for (const file of ['inventory.js','inventory-ui.js','inventory.css','camping.js']) files.add(`viewer/${file}`);
 
 function addDirectory(relative) {
   for (const entry of fs.readdirSync(path.join(root, relative), { withFileTypes: true })) {
