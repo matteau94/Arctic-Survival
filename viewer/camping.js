@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { startTentSetup } from './tent-setup.js';
+import { createTentDoor } from './tent-door.js';
 
 const tentScale={x:1.6,y:2,z:1.4};
 const sizes={tent:[1.05*tentScale.x,1.35*tentScale.z],'sleeping-bag':[.36,1]};
@@ -22,6 +24,10 @@ function campModel(id,preview=false){
       -1.05,0,-1.35, 1.05,0,-1.35, 0,1.5,-1.35,
     ],3));
     geometry.computeVertexNormals();group.add(new THREE.Mesh(geometry,fabric));
+    const door=createTentDoor(preview);
+    const doorMount=new THREE.Group();
+    doorMount.scale.set(1/tentScale.x,1/tentScale.y,1/tentScale.z);
+    doorMount.add(door);group.add(doorMount);
     box(2.1,.025,2.7,0,.015,0,trim);
     for(const z of [-1.35,1.35]){
       for(const sign of [-1,1]){
@@ -42,7 +48,7 @@ function campModel(id,preview=false){
 
 export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacles}){
   const placed=[];
-  let ghost=null,item=null,rotation=0,candidate=null,valid=false;
+  let ghost=null,item=null,rotation=0,candidate=null,valid=false,setup=null;
   const hint=document.createElement('div');
   hint.style.cssText='position:fixed;left:50%;top:80px;transform:translateX(-50%);max-width:90vw;padding:12px 18px;background:#081b29e8;color:white;border:1px solid #8cbdc7;border-radius:8px;text-align:center;pointer-events:none;z-index:1;font:14px system-ui';
   hint.hidden=true;hint.setAttribute('role','status');document.body.append(hint);
@@ -63,7 +69,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     ghost.traverse(o=>{if(o.isMesh){o.geometry.dispose();materials.add(o.material);}});
     materials.forEach(m=>m.dispose());ghost=null;
   }
-  function cancel(){disposeGhost();item=null;candidate=null;hint.hidden=true;}
+  function cancel(){if(setup){const previous=setup;setup=null;previous.cancel();}disposeGhost();item=null;candidate=null;hint.hidden=true;}
   function update(){
     if(!item)return;
     const player=getPlayer();if(!player)return;
@@ -100,12 +106,44 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     hint.textContent=`${item==='tent'?'Small tent':'Sleeping bag'} · ${valid?'Click to place':'Choose dry, clear, gently sloping ground'} · R rotate · Esc cancel`;
   }
   return {
+    tents:()=>placed.filter(p=>p.data.id==='tent'),
     begin(id){if(!sizes[id])return;cancel();item=id;rotation=0;ghost=campModel(id,true);scene.add(ghost);hint.hidden=false;update();},
     active:()=>Boolean(item),cancel,update,
+    busy:()=>Boolean(setup),
+    beforeFrame(){setup?.beforeFrame();},
+    tick(dt){if(setup){const label=setup.tick(dt);if(setup&&label)hint.textContent=label;}},
     rotate(){rotation+=Math.PI/4;update();},
     place(){
+      if(setup)return;
       update();if(!valid||!candidate)return;
-      const id=item,p={...candidate};const result=inventory.deploy(id,p);
+      const id=item,p={...candidate};
+      if(id==='tent'){
+        const player=getPlayer(),start=player.root.position.clone();
+        const direction=new THREE.Vector3(p.x-start.x,0,p.z-start.z).normalize();
+        const end=new THREE.Vector3(p.x,0,p.z).addScaledVector(direction,-2.6);
+        let previousHeight=surface.height(start.x,start.z);
+        // Only animate a short approach when its entire route is traversable.
+        for(let i=1;i<=20;i++){
+          const x=THREE.MathUtils.lerp(start.x,end.x,i/20),z=THREE.MathUtils.lerp(start.z,end.z,i/20),h=surface.height(x,z);
+          if(!Number.isFinite(h)||h<=0||Math.abs(h-previousHeight)>.2||obstacles.some(b=>x>b.min.x-.5&&x<b.max.x+.5&&z>b.min.z-.5&&z<b.max.z+.5)){
+            hint.textContent='Move closer to a clear, gentle approach before setting up the tent.';return;
+          }
+          previousHeight=h;
+        }
+        disposeGhost();item=null;candidate=null;
+        const tent=campModel(id);transform(tent,p);scene.add(tent);
+        function removeTent(){scene.remove(tent);const materials=new Set();tent.traverse(o=>{if(o.isMesh){o.geometry.dispose();materials.add(o.material);}});materials.forEach(m=>m.dispose());}
+        setup=startTentSetup({player,scene,surface,position:p,tent,
+          onCancel:()=>{removeTent();hint.hidden=true;},
+          onComplete:()=>{
+            setup=null;const result=inventory.deploy(id,p);
+            if(result.ok){placed.push({data:{id,...p},mesh:tent});hint.hidden=true;}
+            else{removeTent();hint.textContent=result.message;}
+          },
+        });
+        return;
+      }
+      const result=inventory.deploy(id,p);
       if(!result.ok){hint.textContent=result.message;return;}
       add({id,...p});cancel();
     },

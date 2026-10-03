@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { TerrainSurface } from './terrain.mjs';
 export const surface = new TerrainSurface();
+let campBlocks=()=>false;
+export function setCampCollision(check){campBlocks=check;}
 let player;
 const wildlife = [], fish = [], obstacles = [];
 export const WILDLIFE_SIMULATION_DISTANCE = 1000;
@@ -48,6 +50,9 @@ export function register(a) {
   a.footOffset=a.type==='human'||profiles[a.type]?.aquatic||ground===null?0:Math.max(0,a.root.position.y-ground);
   a.state='Roaming';
   if(a.type==='human') {a.turnStepTime=0;prepareFootContact(a);}
+}
+export function unregister(a){
+  for(const list of [wildlife,fish]){const index=list.indexOf(a);if(index>=0)list.splice(index,1);}
 }
 function prepareFootContact(a) {
   a.soleSamples=[];
@@ -113,6 +118,7 @@ export function updateFootContact(a,dt) {
 }
 function step(a, dx, dz) {
   const p=a.root.position, x=p.x+dx,z=p.z+dz;
+  if(a.type==='human'&&campBlocks(x,z))return false;
   const h=surface.height(x,z), aquatic=profiles[a.type]?.aquatic;
   if (h===null) return false;
   if (aquatic) {

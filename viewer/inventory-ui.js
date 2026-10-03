@@ -1,7 +1,7 @@
 let nextInventoryId = 0;
 
 /** The parent owns keyboard shortcuts, pointer lock, and the CSS link. */
-export function createInventoryUI({ inventory, onClose, onOpen, onPlace }) {
+export function createInventoryUI({ inventory, onClose, onOpen, onPlace, canPlace=()=>true }) {
   const prefix = `inventory-${++nextInventoryId}`;
   let enabled = false;
   let selectedId = null;
@@ -116,7 +116,9 @@ export function createInventoryUI({ inventory, onClose, onOpen, onPlace }) {
         element('p', '', selected.description || 'No description available.'),
         element('p', 'inventory-item-meta', `Quantity: ${format(selected.quantity)} · ${format(selected.unitWeight)} kg each`));
       if(onPlace&&['tent','sleeping-bag'].includes(selected.id)){
-        details.append(button('Place on ground',()=>{const id=selected.id;close();onPlace(id);},'place'));
+        const placeButton=button('Place on ground',()=>{if(!canPlace())return;const id=selected.id;close();onPlace(id);},'place');
+        placeButton.disabled=!canPlace();details.append(placeButton);
+        if(!canPlace())details.append(element('p','','Step outside to place camping equipment.'));
       }
       if (confirmingId === selected.id) {
         const confirmation = element('div', 'inventory-confirmation');

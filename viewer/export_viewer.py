@@ -3,12 +3,15 @@ import bpy
 import numpy as np
 import os
 import json
+import runpy
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 os.makedirs(OUT, exist_ok=True)
 scene = bpy.context.scene
 scene.frame_set(1)
 bpy.context.view_layer.update()
+habitat_helper=runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'habitat-waypoints.py'))
+habitat_helper['export_waypoints'](scene, os.path.join(OUT, 'waypoints.json'))
 assets = {'penguin':'Penguin_Animated.glb', 'fox':'ArcticFox_Animated.glb',
           'bear':'Polar Bear Animated.glb', 'fish':'Fish Animated.glb',
           'orca':'Orca_Animated.glb', 'cabin':'Scenery/Winter Cabin.glb',
