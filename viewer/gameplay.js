@@ -162,19 +162,25 @@ export function updateGame(dt, keys, camera) {
   const animationSpeed=moved?(crouch?.7:run?SPRINT_SPEED:WALK_SPEED):turning?(crouch?.75:1.3):0;
   animate(player,crouch?(walking?'crouchWalk':'crouchIdle'):moved&&run?'run':walking?'walk':'idle',animationSpeed);
   player.state=moved?(run?'Running':crouch?'Crouching':'Walking'):turning?'Turning':'Idle';
+  updateWildlife(dt,player.root.position,player.root.position);
+}
+
+// Spectators activate nearby wildlife without moving or alerting the player.
+export function updateWildlife(dt,focus,threat=null) {
   for (const a of wildlife) {
     const profile=profiles[a.type], p=a.root.position;
-    const distanceSquared=p.distanceToSquared(player.root.position);
-    // Distant animals resume from their current state when the player returns.
-    if(distanceSquared>WILDLIFE_SIMULATION_DISTANCE*WILDLIFE_SIMULATION_DISTANCE) continue;
+    const distanceSquared=(p.x-focus.x)**2+(p.z-focus.z)**2;
+    // Include visible model bounds at the edge of the simulation radius.
+    if(distanceSquared>(WILDLIFE_SIMULATION_DISTANCE+(a.renderRadius||0))**2) continue;
+    const threatDistanceSquared=threat?p.distanceToSquared(threat):Infinity;
     a.think-=dt;
     let fast=false;
-    if (!profile.aquatic && distanceSquared<profile.alert*profile.alert) {
-      away.copy(p).sub(player.root.position);away.y=0;
+    if (!profile.aquatic && threatDistanceSquared<profile.alert*profile.alert) {
+      away.copy(p).sub(threat);away.y=0;
       if (away.lengthSq()<.001) away.set(1,0,0);
       a.destination.copy(p).addScaledVector(away.normalize(),a.type==='bear'?-10:20);
       a.state=a.type==='bear'?'Approaching':'Fleeing';fast=true;
-      if(a.type==='bear'&&distanceSquared<9) a.destination.copy(p);
+      if(a.type==='bear'&&threatDistanceSquared<9) a.destination.copy(p);
     } else if(a.think<=0) {
       a.think=3+Math.random()*5;a.state='Roaming';
       let prey=null,nearestSquared=1500*1500;

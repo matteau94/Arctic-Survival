@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { worldSeed, transformWorldPoint, reshapeTerrain, reshapeManifest } from './world-seed.js';
 import { createTerrainTiles, createTerrainMaterial } from './terrain-render.js';
-import { surface, register, updateGame, updateFootContact, setCampCollision } from './gameplay.js';
+import { surface, register, updateGame, updateWildlife, updateFootContact, setCampCollision } from './gameplay.js';
 import { createFootprints } from './footprints.js';
 import { createInventory } from './inventory.js';
 import { createInventoryUI } from './inventory-ui.js';
@@ -242,11 +242,11 @@ function frame(){
   if(ready&&spectating){
     foxDens?.hide();
     updateSpectator(dt);
-    if(locked)wildlifeStream?.update(dt,spectatorPosition);
+    if(locked){wildlifeStream?.update(dt,spectatorPosition);updateWildlife(dt,spectatorPosition);}
     for(const a of actors){
       const distance=a.root.position.distanceTo(spectatorPosition);
       a.root.visible=a!==player&&distance<((a.type==='cabin'||a.type==='village')?6000:1000)+a.renderRadius;
-      if(a.root.visible&&locked&&a.clips.length){a.mixer.update(dt);a.root.updateMatrixWorld(true);}
+      if(a.root.visible&&locked){if(a.clips.length)a.mixer.update(dt);a.root.updateMatrixWorld(true);}
     }
     waypointHUD?.setVisible(true);waypointHUD?.update({visible:locked});
     ocean.visible=camera.position.y>=0;renderer.render(scene,camera);return;
