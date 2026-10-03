@@ -10,6 +10,7 @@ files.add('viewer/habitat-density.js');
 files.add('viewer/fox-dens.js');
 files.add('viewer/wildlife-stream.js');
 files.add('viewer/world-seed.js');
+files.add('viewer/cold.js');
 const world = JSON.parse(fs.readFileSync(path.join(root, 'viewer/data/world.json'), 'utf8'));
 for (const file of ['inventory.js','inventory-ui.js','inventory.css','camping.js','tent-setup.js','tent-interior.js','tent-door.js']) files.add(`viewer/${file}`);
 

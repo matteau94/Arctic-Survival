@@ -63,7 +63,8 @@ function readSavedItems(raw) {
   if(!Array.isArray(placements)||placements.length>100||placements.some(p=>
     !p||!['tent','sleeping-bag'].includes(p.id)||
     !['x','y','z','yaw','slopeX','slopeZ'].every(k=>Number.isFinite(p[k]))||
-    Math.abs(p.x)>1e7||Math.abs(p.z)>1e7||Math.abs(p.y)>1e5||Math.hypot(p.slopeX,p.slopeZ)>.3
+    Math.abs(p.x)>1e7||Math.abs(p.z)>1e7||Math.abs(p.y)>1e5||Math.hypot(p.slopeX,p.slopeZ)>.3||
+    (p.tentIndex!==undefined&&(p.id!=='sleeping-bag'||!Number.isSafeInteger(p.tentIndex)||p.tentIndex<0||placements[p.tentIndex]?.id!=='tent'||placements[p.tentIndex]?.tentIndex!==undefined||p.y!==0||p.slopeX!==0||p.slopeZ!==0))
   ))throw new Error('Invalid campsite save.');
   const migrationOverflow=saved.version===1||saved.campingMigration===true;
   const count=totals(items);
@@ -173,9 +174,12 @@ export function createInventory({ storage } = {}) {
       if(!['tent','sleeping-bag'].includes(id)||!(items.get(id)>0))return {ok:false,message:'This item is not in your backpack.'};
       if(placements.length>=100)return {ok:false,message:'Campsite placement limit reached.'};
       if(!position||!['x','y','z','yaw','slopeX','slopeZ'].every(k=>Number.isFinite(position[k]))||Math.hypot(position.slopeX,position.slopeZ)>.3)return {ok:false,message:'Invalid campsite position.'};
+      const tentIndex=position.tentIndex;
+      if(tentIndex!==undefined&&(id!=='sleeping-bag'||!Number.isSafeInteger(tentIndex)||tentIndex<0||placements[tentIndex]?.id!=='tent'||placements[tentIndex]?.tentIndex!==undefined||position.y!==0||position.slopeX!==0||position.slopeZ!==0))return {ok:false,message:'Invalid tent placement.'};
       const next=new Map(items),quantity=next.get(id)-1;
       if(quantity)next.set(id,quantity);else next.delete(id);
-      placements=[...placements,{id,...Object.fromEntries(['x','y','z','yaw','slopeX','slopeZ'].map(k=>[k,position[k]]))}];
+      // Placements are append-only, so their indices also identify tents in older saves.
+      placements=[...placements,{id,...Object.fromEntries(['x','y','z','yaw','slopeX','slopeZ'].map(k=>[k,position[k]])),...(tentIndex===undefined?{}:{tentIndex})}];
       return commit(next,`${definitionFor(id).name} placed.`);
     },
     add: (id, quantity = 1) => change(id, quantity, false),

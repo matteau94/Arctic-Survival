@@ -46,7 +46,7 @@ function campModel(id,preview=false){
   return group;
 }
 
-export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacles}){
+export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacles,canPlace=()=>true,getInterior=()=>null}){
   const placed=[];
   let ghost=null,item=null,rotation=0,candidate=null,valid=false,setup=null;
   const hint=document.createElement('div');
@@ -61,18 +61,43 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right,normal,forward));
     mesh.updateMatrixWorld(true);
   }
-  function add(p){const mesh=campModel(p.id);transform(mesh,p);scene.add(mesh);placed.push({data:p,mesh});}
+  function add(p){
+    const mesh=campModel(p.id);transform(mesh,p);
+    if(p.tentIndex===undefined)scene.add(mesh);
+    else{const interior=getInterior();if(interior?.tentIndex===p.tentIndex)interior.scene.add(mesh);}
+    placed.push({data:p,mesh});
+  }
   for(const p of inventory.snapshot().placements)add(p);
   function disposeGhost(){
     if(!ghost)return;
-    scene.remove(ghost);const materials=new Set();
+    ghost.removeFromParent();const materials=new Set();
     ghost.traverse(o=>{if(o.isMesh){o.geometry.dispose();materials.add(o.material);}});
     materials.forEach(m=>m.dispose());ghost=null;
   }
   function cancel(){if(setup){const previous=setup;setup=null;previous.cancel();}disposeGhost();item=null;candidate=null;hint.hidden=true;}
   function update(){
     if(!item)return;
+    valid=false;candidate=null;
+    if(!canPlace(item)){cancel();return;}
     const player=getPlayer();if(!player)return;
+    const interior=getInterior();
+    if(interior){
+      if(item!=='sleeping-bag'){cancel();return;}
+      const yaw=getYaw(),p={x:player.root.position.x+Math.sin(yaw)*1.8,y:0,z:player.root.position.z+Math.cos(yaw)*1.8,yaw:yaw+rotation,slopeX:0,slopeZ:0,tentIndex:interior.tentIndex};
+      if(ghost.parent!==interior.scene)interior.scene.add(ghost);
+      transform(ghost,p);
+      const bounds=new THREE.Box3().setFromObject(ghost);
+      // Keep the complete rotated model inside the walls and clear of the doorway.
+      valid=bounds.min.x>=-3.4&&bounds.max.x<=3.4&&bounds.min.z>=-3.9&&bounds.max.z<=3.9;
+      if(bounds.min.x<1.5&&bounds.max.x>-1.5&&bounds.max.z>1.9)valid=false;
+      const playerPosition=player.root.position;
+      if(bounds.min.x<playerPosition.x+.4&&bounds.max.x>playerPosition.x-.4&&bounds.min.z<playerPosition.z+.4&&bounds.max.z>playerPosition.z-.4)valid=false;
+      for(const existing of placed)if(existing.data.tentIndex===p.tentIndex&&new THREE.Box3().setFromObject(existing.mesh).intersectsBox(bounds))valid=false;
+      ghost.traverse(o=>{if(o.isMesh)o.material.color.set(valid?0x70e7b0:0xef6464);});
+      candidate=p;
+      hint.textContent=`Sleeping bag · ${valid?'Click to place':'Choose clear floor space away from walls and the doorway'} · R rotate · Esc cancel`;
+      return;
+    }
     const yaw=getYaw(),distance=item==='tent'?4.5:3.5;
     const x=player.root.position.x+Math.sin(yaw)*distance,z=player.root.position.z+Math.cos(yaw)*distance;
     const h=surface.height(x,z),hx=surface.height(x+.5,z),hz=surface.height(x,z+.5);
@@ -88,6 +113,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     const bounds=new THREE.Box3().setFromObject(ghost);
     if(obstacles.some(b=>b.intersectsBox(bounds)))valid=false;
     for(const existing of placed){
+      if(existing.data.tentIndex!==undefined)continue;
       // A sleeping bag may fit inside a tent; same-type items cannot overlap.
       const b=new THREE.Box3().setFromObject(existing.mesh);
       if(existing.data.id===item&&b.intersectsBox(bounds))valid=false;
@@ -107,7 +133,11 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
   }
   return {
     tents:()=>placed.filter(p=>p.data.id==='tent'),
-    begin(id){if(!sizes[id])return;cancel();item=id;rotation=0;ghost=campModel(id,true);scene.add(ghost);hint.hidden=false;update();},
+    tentIndex:tent=>placed.indexOf(tent),
+    showInterior(room,tentIndex){
+      for(const entry of placed)if(entry.data.tentIndex!==undefined){room.add(entry.mesh);entry.mesh.visible=entry.data.tentIndex===tentIndex;}
+    },
+    begin(id){if(!sizes[id]||!canPlace(id))return;cancel();item=id;rotation=0;ghost=campModel(id,true);(getInterior()?.scene??scene).add(ghost);hint.hidden=false;update();},
     active:()=>Boolean(item),cancel,update,
     busy:()=>Boolean(setup),
     beforeFrame(){setup?.beforeFrame();},

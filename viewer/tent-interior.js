@@ -52,7 +52,9 @@ export function createTentInterior({world,player,camera,camping,keys,getYaw,setY
   }
   return {
     inside:()=>inside,active:()=>inside||Boolean(transition),scene:()=>inside?room:world,
+    placementContext:()=>inside&&!transition?{scene:room,tentIndex:camping.tentIndex(activeTent)}:null,
     interact(){refreshPrompt();if(!nearby||transition)return;
+      camping.cancel();
       if(!inside){activeTent=nearby;home={position:player.root.position.clone(),rotation:player.root.rotation.y,yaw:getYaw()};}
       keys.clear();pose('Idle');transition={time:0,switched:false};prompt.hidden=true;
     },
@@ -68,7 +70,7 @@ export function createTentInterior({world,player,camera,camping,keys,getYaw,setY
         fade.style.opacity=String(t<2.3?0:t<2.65?(t-2.3)/.35:t<2.8?1:Math.max(0,1-(t-2.8)/.35));
         if(t>=2.65&&!transition.switched){
           transition.switched=true;inside=!inside;
-          if(inside){room.add(player.root);player.root.position.set(0,0,2.7);player.root.rotation.y=Math.PI;setYaw(Math.PI);}
+          if(inside){camping.showInterior(room,camping.tentIndex(activeTent));room.add(player.root);player.root.position.set(0,0,2.7);player.root.rotation.y=Math.PI;setYaw(Math.PI);}
           else{world.add(player.root);player.root.position.copy(home.position);player.root.rotation.y=home.rotation;setYaw(home.yaw);}
           player.root.updateMatrixWorld(true);keys.clear();
         }

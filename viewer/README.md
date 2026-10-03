@@ -1,5 +1,25 @@
 # Arctic Survival browser game
 
+## Cold and shelter
+
+Exposure starts at 0 and increases by 1 per active outdoor game second. At 360
+the expedition ends from cold. Cold shares movement's delta capped at 0.05 seconds
+per frame: at 10 FPS, six game minutes take about twelve real minutes. The HUD
+shows exposure and approximate remaining outdoor game time to one decimal
+second at each update (at most once per second), with warnings
+at 120 and 240. Use E to place your tent, then approach its zipper and press F,
+or approach a fox den entrance and press F. A tent interior recovers 3 exposure
+seconds per active game second; a den interior recovers 1, down to 0. Sleeping bags
+do not provide recovery. Setup and door entry count outdoors until actually
+inside; exiting uses the actual inside state too. Setup plus the entry transition
+to inside takes 11.15 game seconds, plus positioning time; this is not a guaranteed
+rescue duration. There are no movement penalties.
+
+Loading, pause, inventory, tab blur and spectator mode freeze exposure and
+recovery; returning from spectator retains exposure. Death blocks play and
+interactions. Only clicking **Restart fresh expedition** reloads from the death
+screen, starting with a fresh world, backpack and zero exposure.
+
 ## Habitat waypoints
 
 Fox dens and penguin nesting colonies have floating icons anchored above their
@@ -34,8 +54,8 @@ To restart from the project directory: `node viewer/server.cjs`.
 
 Click **Enter world** to control the human survivor and lock the mouse cursor.
 Press **E** or click **Inventory [E]** to open the climber's backpack. It holds
-up to 24 stacks and 20 kg, begins with basic expedition supplies, and saves its
-contents in this browser. Select an item to inspect it; discarding requires
+up to 24 stacks and 20 kg and begins with basic expedition supplies. Inventory
+lasts only for the current session. Select an item to inspect it; discarding requires
 confirmation and permanently removes one item. Inventory pauses the expedition
 and releases the cursor. Close it with **E**, **Esc**, or **Close**, then click
 **Resume expedition** to continue.
@@ -44,16 +64,16 @@ You start with a small tent and sleeping bag. Select either in **Inventory**,
 then **Place on ground**. Look and move to position the preview in front of you,
 press **R** to rotate, and click when it is green to place. **Esc** cancels without
 using the item. Placement needs dry, clear, gently sloping ground; a sleeping bag
-can fit inside the tent. Placement removes one item from the backpack and saves
-the campsite together with inventory in this browser. Older inventory saves get
-the camping kit once; if that exceeds capacity, remove items before adding more.
+can fit inside the tent. Placement removes one item from the backpack and keeps
+the campsite only for the current session. Reloading starts a fresh world with
+fresh starter supplies, including the tent and sleeping bag; previous camps are cleared.
 Sleeping effects, packing up, consuming supplies, and gathering are not implemented.
 
 Placing a tent starts an 8.5-second setup animation: reach for the backpack,
 carry the packed tent, unroll its groundsheet, and raise the canvas. Movement is
 held during setup; mouse look stays available. Esc cancels and keeps the tent
 in inventory. Opening inventory also cancels; losing focus pauses setup until
-you resume. The tent is consumed and saved only after assembly completes.
+you resume. The tent is removed from inventory and placed for this session only after assembly completes.
 Move the mouse to turn the survivor and look up or down. A centered third-person
 camera follows behind the character, similar to Minecraft's rear third-person
 view, and moves closer when terrain or buildings obstruct it.
@@ -88,4 +108,4 @@ The browser uses the original GLB files and locally stored Three.js 0.170.0 modu
 The server binds only to the local computer and permits viewer files and the eight
 asset GLBs, rather than exposing the entire project directory.
 
-Walk to the tent's front zipper and press **F** to unzip and enter a separate, warmly lit 7 x 8 metre interior. Use WASD or arrows to walk inside. Approach the interior zipper and press **F** to return to your entry position outside. E still opens inventory; camping equipment placement is currently outdoors only. Tent walls block walking through the canvas. Reloading starts outdoors; saved tents remain.
+Walk to the tent's front zipper and press **F** to unzip and enter a separate, warmly lit 7 x 8 metre interior. Use WASD or arrows to walk inside. Approach the interior zipper and press **F** to return to your entry position outside. E still opens inventory; camping equipment placement is currently outdoors only. Tent walls block walking through the canvas. Reloading starts outdoors in a fresh world with fresh starter supplies; previous tents do not remain.

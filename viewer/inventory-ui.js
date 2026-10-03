@@ -116,9 +116,9 @@ export function createInventoryUI({ inventory, onClose, onOpen, onPlace, canPlac
         element('p', '', selected.description || 'No description available.'),
         element('p', 'inventory-item-meta', `Quantity: ${format(selected.quantity)} · ${format(selected.unitWeight)} kg each`));
       if(onPlace&&['tent','sleeping-bag'].includes(selected.id)){
-        const placeButton=button('Place on ground',()=>{if(!canPlace())return;const id=selected.id;close();onPlace(id);},'place');
-        placeButton.disabled=!canPlace();details.append(placeButton);
-        if(!canPlace())details.append(element('p','','Step outside to place camping equipment.'));
+        const placeButton=button('Place',()=>{if(!canPlace(selected.id))return;const id=selected.id;close();onPlace(id);},'place');
+        placeButton.disabled=!canPlace(selected.id);details.append(placeButton);
+        if(!canPlace(selected.id))details.append(element('p','','This item cannot be placed here right now.'));
       }
       if (confirmingId === selected.id) {
         const confirmation = element('div', 'inventory-confirmation');
