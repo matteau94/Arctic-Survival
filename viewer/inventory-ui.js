@@ -1,3 +1,4 @@
+import { hudHint } from './cold.js';
 let nextInventoryId = 0;
 
 /** The parent owns keyboard shortcuts, pointer lock, and the CSS link. */
@@ -25,6 +26,7 @@ export function createInventoryUI({ inventory, onClose, onOpen, onPlace, canPlac
 
   const hud = button('Inventory [E]', open);
   hud.classList.add('inventory-hud');
+  hudHint(hud,'pack','E','Inventory · E. Manage equipment and place shelter.');
   hud.disabled = true;
   hud.setAttribute('aria-haspopup', 'dialog');
   hud.setAttribute('aria-controls', prefix);

@@ -1,8 +1,10 @@
+import { hudHint } from './cold.js';
 import { Vector3 } from 'three';
 
 const STORAGE_KEY = 'artic-survival.waypoints.v1';
 // Single-colour symbols, distinguished by silhouette.
 const ICONS = {
+ tent: '<path d="M1 14 8 2l7 12ZM5 14l3-7 3 7"/>',
  fox_den: '<path d="M2 2 6 5h4l4-3-1 9-5 4-5-4Z M4.5 8l2 1m3-1-2 1M7 11h2"/>',
  penguin_nest: '<path d="M5 10C3 6 6 2 8 2s5 4 3 8M2 10q6 4 12 0l-2 4H4Z M7 5h2"/>',
 };
@@ -32,7 +34,7 @@ function icon(type) {
  * setVisible is a persistent gate; update({visible}) is an additional frame gate.
  * Call update from the parent frame loop. This module never handles pointer lock.
  */
-export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
+export function createWaypoints({ camera, getPlayer, waypoints = [], subscribe = null }) {
   let disabled = new Set();
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -45,6 +47,7 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
   hud.setAttribute('aria-hidden', 'true');
   const panel = element('details', 'waypoints-panel');
   const summary = element('summary', 'waypoints-summary', 'Locations');
+  hudHint(summary,'map','','Locations: expand to pin landmarks. Esc releases the cursor.');
   const hint = element('span', 'waypoints-hint', 'Esc to manage locations');
   hint.hidden = true;
   summary.append(hint);
@@ -64,12 +67,13 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
   const projected = new Vector3();
   const view = new Vector3();
 
-  for (const point of waypoints) {
-    if (!point || !Object.hasOwn(ICONS, point.type) || point.id == null ||
+  const empty = element('li', 'waypoints-empty', 'No locations available.');
+  function add(point) {
+    if (disposed || !point || !Object.hasOwn(ICONS, point.type) || point.id == null ||
         !Array.isArray(point.position) || point.position.length !== 3 ||
-        !point.position.every(Number.isFinite)) continue;
+        !point.position.every(Number.isFinite)) return;
     const id = String(point.id);
-    if (ids.has(id)) continue;
+    if (ids.has(id)) return;
     ids.add(id);
     const name = String(point.name || point.type.replaceAll('_', ' '));
     const marker = element('div', `waypoints-marker waypoints-${point.type}`);
@@ -103,9 +107,11 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
     record.onToggle = () => {
       record.pinned = !record.pinned;
       refreshToggle();
-      // Persist only the disabled ids in this fixed set, keeping storage small.
+      // Retain disabled IDs for locations that have not been added yet.
+      if (record.pinned) disabled.delete(id);
+      else disabled.add(id);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(records.filter(r => !r.pinned).map(r => r.id)));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...disabled]));
       } catch { /* Private mode/quota failures must not break navigation. */ }
       dirty = true;
       update({ visible: frameVisible });
@@ -115,9 +121,14 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
     row.append(icon(point.type), rowText, toggle);
     list.append(row);
     records.push(record);
+    empty.remove();
+    dirty = true;
   }
-  if (!records.length) list.append(element('li', 'waypoints-empty', 'No locations available.'));
+  for (const point of waypoints) add(point);
+  if (!records.length) list.append(empty);
   document.body.append(root);
+  // The owner supplies committed additions; disposal releases its listener.
+  const unsubscribe = subscribe?.(add);
 
   function readPlayer() {
     const player = getPlayer();
@@ -152,6 +163,8 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
     root.hidden = false;
     camera.updateWorldMatrix(true, false);
     const width = hud.clientWidth, height = hud.clientHeight;
+    // Proportional reserves retain a marker band on short viewports.
+    const markerTop=Math.min(230,height*.45),markerBottom=height-Math.min(170,height*.30);
     const candidates=[];
     for (const record of records) {
       record.metres = playerPosition.distanceTo(record.position);
@@ -182,7 +195,7 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
           const angle=candidate.bearing+degrees*Math.PI/180;
           if(Math.abs(angle)>=Math.PI/2)continue;
           const x=width/2+Math.tan(angle)*focal,y=candidate.y+row*84;
-          if(x<76||x>width-76||y<100||y>height-65)continue;
+          if(x<76||x>width-76||y<markerTop||y>markerBottom)continue;
           const rect={left:x-72,right:x+72,top:y-76,bottom:y};
           if(rect.left<panelRect.right&&rect.right>panelRect.left&&rect.top<panelRect.bottom&&rect.bottom>panelRect.top)continue;
           if(occupied.some(r=>rect.left<r.right+12&&rect.right+12>r.left&&rect.top<r.bottom+8&&rect.bottom+8>r.top))continue;
@@ -218,11 +231,12 @@ export function createWaypoints({ camera, getPlayer, waypoints = [] }) {
   function dispose() {
     if (disposed) return;
     disposed = true;
+    unsubscribe?.();
     panel.removeEventListener('toggle', onPanelToggle);
     for (const record of records) record.toggle.removeEventListener('click', record.onToggle);
     root.remove();
   }
 
-  return { update, setVisible, dispose };
+  return { add, update, setVisible, dispose };
 }
 

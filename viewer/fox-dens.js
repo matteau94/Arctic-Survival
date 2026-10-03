@@ -1,10 +1,11 @@
+import { hudHint } from './cold.js';
 import * as THREE from 'three';
 
 // Build only the occupied den; release its meshes when the player leaves.
 export function createFoxDens({camera,player,keys,locations,getYaw,setYaw,getPitch,setPitch}){
   const dens=locations.filter(p=>p.type==='fox_den'&&Array.isArray(p.position)&&p.position.length===3&&p.position.every(Number.isFinite));
   const prompt=document.createElement('div');
-  prompt.style.cssText='position:fixed;bottom:110px;left:50%;transform:translateX(-50%);padding:10px 18px;background:#17252de8;color:white;border-radius:8px;pointer-events:none';
+  prompt.className='context-hint';
   prompt.hidden=true;document.body.append(prompt);
   let room=null,cells=null,nearby=null,homeYaw=0,homePitch=0,denName='Fox den';
   const position=new THREE.Vector3(),direction=new THREE.Vector3(),move=new THREE.Vector3();
@@ -101,10 +102,10 @@ export function createFoxDens({camera,player,keys,locations,getYaw,setYaw,getPit
   }
   function refresh(){
     nearby=null;
-    if(room){prompt.textContent=position.z>-.9?'F · Leave fox den':`${denName} · WASD to explore · Return to the snowy entrance to leave`;return;}
+    if(room){hudHint(prompt,position.z>-.9?'enter':'den',position.z>-.9?'F · Leave den':'WASD · Explore · Exit at snow',`${denName}. Return to the snowy entrance and press F to leave.`);return;}
     let nearest=3.5;
     for(const den of dens){const [x,y,z]=den.position,distance=Math.hypot(player.root.position.x-x,player.root.position.z-z);if(distance<nearest&&Math.abs(player.root.position.y-y)<3){nearby=den;nearest=distance;}}
-    prompt.textContent='F · Enter fox den';
+    hudHint(prompt,'den','F · Enter den','F · Enter fox den to recover 1 exposure second per active game second.');
   }
   return {
     active:()=>!!room,scene:()=>room,

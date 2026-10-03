@@ -6,8 +6,8 @@ export const ITEM_DEFINITIONS = Object.freeze(Object.fromEntries([
   { id: 'rope', name: 'Rope', description: 'A coil of climbing rope.', category: 'equipment', unitWeight: 1.5, maxStack: 1 },
   { id: 'matches', name: 'Matches', description: 'A small waterproof box of matches.', category: 'equipment', unitWeight: 0.02, maxStack: 5 },
   { id: 'ice-axe', name: 'Ice axe', description: 'A steel-headed mountaineering ice axe.', category: 'equipment', unitWeight: 0.75, maxStack: 1 },
-  { id: 'tent', name: 'Small tent', description: 'A compact one-person tent. Place on dry, gently sloping ground.', category: 'camping', unitWeight: 2, maxStack: 1 },
-  { id: 'sleeping-bag', name: 'Sleeping bag', description: 'An insulated sleeping bag. Place on the ground or inside your tent.', category: 'camping', unitWeight: 1.2, maxStack: 1 },
+  { id: 'tent', name: 'Small tent', description: 'Place on dry, gently sloping ground. A bare tent blocks further cold but does not restore warmth. Enter, then place your sleeping bag inside to recover 3 exposure seconds per active game second. Placement commits your tent to this campsite for the expedition; it cannot be picked up or moved.', category: 'camping', unitWeight: 2, maxStack: 1 },
+  { id: 'sleeping-bag', name: 'Sleeping bag', description: 'Enter a tent, then place this bag inside to enable warmth recovery in that tent. Bare tents only block cold. Carried bags and bags placed outdoors give no warmth. Placement is permanent for this expedition; the bag cannot be picked up or moved.', category: 'camping', unitWeight: 1.2, maxStack: 1 },
 ].map((definition) => [definition.id, Object.freeze(definition)])));
 
 const STORAGE_KEY = 'artic-survival.inventory';

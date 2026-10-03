@@ -1,10 +1,11 @@
+import { placeNearbySettlements } from './nearby-settlements.js';
 import * as THREE from 'three';
 import { worldSeed, transformWorldPoint, reshapeTerrain, reshapeManifest } from './world-seed.js';
 import { createTerrainTiles, createTerrainMaterial } from './terrain-render.js';
 import { surface, register, updateGame, updateWildlife, updateFootContact, setCampCollision } from './gameplay.js';
 import { createFootprints } from './footprints.js';
 import { createInventory } from './inventory.js';
-import { createCold } from './cold.js';
+import { createCold, renderControls } from './cold.js';
 import { createInventoryUI } from './inventory-ui.js';
 import { createCamping } from './camping.js';
 import { createTentInterior } from './tent-interior.js';
@@ -31,7 +32,7 @@ let spectating=false;
 const spectatorPosition=new THREE.Vector3();
 const spectatorForward=new THREE.Vector3(),spectatorRight=new THREE.Vector3(),spectatorMove=new THREE.Vector3();
 let survivalView=null,teleportLocations=[];
-const survivalHelp=$('help').textContent;
+renderControls($('help'));
 const cold=createCold({onDeath:()=>{
   keys.clear();locked=false;
   inventoryUI.setEnabled(false);
@@ -39,32 +40,49 @@ const cold=createCold({onDeath:()=>{
   $('play').disabled=true;$('spectate').disabled=true;$('teleport').disabled=true;
   if(document.pointerLockElement===renderer.domElement)document.exitPointerLock();
 }});
+function spectatorBlockReason(){
+  if(!ready)return 'Spectator mode is available once the world has loaded.';
+  if(tentInterior?.transitioning())return 'Resume the expedition to finish entering or leaving the tent before spectating.';
+  if(camping?.busy())return 'Resume the expedition to finish tent setup before spectating.';
+  return '';
+}
 function refreshModeMenu(){
   if(cold.dead())return;
   $('play').textContent=spectating?'Return to survival':'Resume expedition';
   $('spectate').textContent=spectating?'Resume spectator mode':'Enter spectator mode';
   $('spectator-tools').hidden=!spectating;
-  $('spectate').disabled=!ready||!!tentInterior?.active()||!!foxDens?.active()||!!camping?.busy();
-  $('help').textContent=spectating?'SPECTATOR · WASD / Arrows · Fly · Space / C · Up / Down · Shift · Faster · T · Teleport · Esc · Menu':survivalHelp;
+  const blocked=spectatorBlockReason();
+  $('spectate').disabled=!!blocked;
+  $('spectate').textContent=blocked||$('spectate').textContent;
+  renderControls($('help'),spectating);
 }
 function enterSpectator(){
   if(cold.dead())return;
   cold.resetClock();
-  if(!ready||tentInterior?.active()||foxDens?.active()||camping?.busy())return;
+  if(spectatorBlockReason()){refreshModeMenu();return;}
   if(!spectating){
     camping?.cancel();
-    survivalView={yaw,pitch};
-    spectatorPosition.copy(camera.position);
+    survivalView={yaw,pitch,cameraPosition:camera.position.clone(),cameraQuaternion:camera.quaternion.clone(),playerVisible:player.root.visible};
+    const tentOrigin=tentInterior?.spectatorOrigin();
+    spectatorPosition.copy(tentOrigin??(foxDens?.active()?player.root.position:camera.position));
+    if(tentOrigin||foxDens?.active())spectatorPosition.y+=12;
     const direction=camera.getWorldDirection(new THREE.Vector3());
     yaw=Math.atan2(direction.x,direction.z);pitch=Math.asin(direction.y);
-    spectating=true;inventoryUI.setEnabled(false);
+    spectating=true;keys.clear();inventoryUI.setEnabled(false);
+    tentInterior?.hide();foxDens?.hide();
   }
   refreshModeMenu();lockPointer();
 }
 function leaveSpectator(){
-  if(cold.dead())return;
+  if(!ready||cold.dead())return;
   cold.resetClock();
-  if(spectating){spectating=false;yaw=survivalView.yaw;pitch=survivalView.pitch;player.root.visible=true;inventoryUI.setEnabled(true);updateCamera();}
+  if(spectating){
+    spectating=false;keys.clear();yaw=survivalView.yaw;pitch=survivalView.pitch;
+    player.root.visible=survivalView.playerVisible;inventoryUI.setEnabled(true);
+    if(tentInterior?.inside()||foxDens?.active()){
+      camera.position.copy(survivalView.cameraPosition);camera.quaternion.copy(survivalView.cameraQuaternion);camera.updateMatrixWorld();
+    }else updateCamera();
+  }
   refreshModeMenu();lockPointer();
 }
 function updateSpectator(dt){
@@ -128,9 +146,10 @@ function updateCamera(){
   camera.lookAt(aim);camera.updateMatrixWorld();
 }
 function captureFailed(){
-  if(cold.dead())return;
+  if(!ready||cold.dead())return;
   $('status').textContent='Mouse capture was blocked. Try again, or open the game in desktop Chrome or Edge if this embedded preview blocks capture.';
-  $('play').textContent='Retry mouse capture';
+  refreshModeMenu();
+  $(spectating?'spectate':'play').textContent='Retry mouse capture';
 }
 async function lockPointer(){
   if(cold.dead())return;
@@ -215,8 +234,11 @@ function groundAnimal(a){
 
 async function loadTerrain(entry){const response=await fetch('/viewer/data/'+entry.file);if(!response.ok)throw new Error(`Terrain ${entry.file}: HTTP ${response.status}`);const buffer=await response.arrayBuffer(),n=entry.vertexCount*3;const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(buffer,0,n),3));geometry.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(buffer,n*4,n),3));geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(buffer,n*8,n),3));geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(buffer,n*12,entry.indexCount),1));reshapeTerrain(geometry);surface.add(geometry.attributes.position.array, geometry.index.array);geometry.computeBoundingBox();const material=createTerrainMaterial(THREE);for(const mesh of createTerrainTiles(THREE,geometry,material)){scene.add(mesh);mesh.updateMatrixWorld(true);terrainMeshes.push(mesh);}}
 
-async function init(){await loadTentDoor();const response=await fetch('/viewer/data/world.json');if(!response.ok)throw new Error(`World manifest: HTTP ${response.status}`);const world=await response.json();reshapeManifest(world);const terrains=Array.isArray(world.terrain)?world.terrain:[world.terrain];for(let i=0;i<terrains.length;i++){if(!terrains[i])continue;$('status').textContent=`Loading terrain ${i+1} / ${terrains.length}…`;await loadTerrain(terrains[i]);} const anchor=world.actors.find(a=>a.type==='penguin'); const spawn=world.spawn??(anchor?[anchor.position[0]+8,anchor.position[1],anchor.position[2]+8]:[0,100,0]); if(Number.isFinite(world.viewYaw))yaw=world.viewYaw; if(Number.isFinite(world.viewPitch))pitch=THREE.MathUtils.clamp(world.viewPitch,-1.2,1.2); world.actors.unshift({id:'player',type:'human',asset:'/Human_Animated.glb',position:spawn,rotation:yaw,scale:1,clip:'Human_Idle'});const loader=new GLTFLoader(),assets=new Map();for(const [i,data] of world.actors.entries()){$('status').textContent=`Loading wildlife ${i+1} / ${world.actors.length}…`;if(!assets.has(data.asset))assets.set(data.asset,await loader.loadAsync(data.asset));const gltf=assets.get(data.asset),model=clone(gltf.scene);model.traverse(o=>{if(/icosphere/i.test(o.name))o.visible=false;});const root=new THREE.Group();root.add(model);root.position.fromArray(data.position);root.rotation.y=data.rotation||0;root.scale.setScalar(data.scale??1);scene.add(root);const a={...data,age:0,root,clips:gltf.animations,mixer:new THREE.AnimationMixer(model),origin:new THREE.Vector3().fromArray(data.position),target:data.target?new THREE.Vector3().fromArray(data.target):null};actors.push(a);const clip=THREE.AnimationClip.findByName(a.clips,data.clip)||a.clips[0];if(clip){a.mixer.clipAction(clip).play();a.clip=clip.name;a.mixer.update(0);}if(a.ground)groundAnimal(a);if(['cabin','village'].includes(a.type))cameraObstacles.push(new THREE.Box3().setFromObject(root));register(a);if(a.type==='human'){player=a;const h=surface.height(a.root.position.x,a.root.position.z);if(h!==null)a.root.position.y=h;}}
+async function init(){await loadTentDoor();const response=await fetch('/viewer/data/world.json');if(!response.ok)throw new Error(`World manifest: HTTP ${response.status}`);const world=await response.json();reshapeManifest(world);const terrains=Array.isArray(world.terrain)?world.terrain:[world.terrain];for(let i=0;i<terrains.length;i++){if(!terrains[i])continue;$('status').textContent=`Loading terrain ${i+1} / ${terrains.length}…`;await loadTerrain(terrains[i]);} const anchor=world.actors.find(a=>a.type==='penguin'); const spawn=world.spawn??(anchor?[anchor.position[0]+8,anchor.position[1],anchor.position[2]+8]:[0,100,0]); if(Number.isFinite(world.viewYaw))yaw=world.viewYaw; if(Number.isFinite(world.viewPitch))pitch=THREE.MathUtils.clamp(world.viewPitch,-1.2,1.2); world.actors.unshift({id:'player',type:'human',asset:'/Human_Animated.glb',position:spawn,rotation:yaw,scale:1,clip:'Human_Idle'});const loader=new GLTFLoader(),assets=new Map();for(const [i,data] of world.actors.entries()){$('status').textContent=`Loading wildlife ${i+1} / ${world.actors.length}…`;if(!assets.has(data.asset))assets.set(data.asset,await loader.loadAsync(data.asset));const gltf=assets.get(data.asset),model=clone(gltf.scene);model.traverse(o=>{if(/icosphere/i.test(o.name))o.visible=false;});const root=new THREE.Group();root.add(model);root.position.fromArray(data.position);root.rotation.y=data.rotation||0;root.scale.setScalar(data.scale??1);scene.add(root);const a={...data,age:0,root,clips:gltf.animations,mixer:new THREE.AnimationMixer(model),origin:new THREE.Vector3().fromArray(data.position),target:data.target?new THREE.Vector3().fromArray(data.target):null};actors.push(a);const clip=THREE.AnimationClip.findByName(a.clips,data.clip)||a.clips[0];if(clip){a.mixer.clipAction(clip).play();a.clip=clip.name;a.mixer.update(0);}if(a.ground)groundAnimal(a);if(!['cabin','village'].includes(a.type))register(a);if(a.type==='human'){player=a;const h=surface.height(a.root.position.x,a.root.position.z);if(h!==null)a.root.position.y=h;}}
 scene.updateMatrixWorld(true);
+spawn[1]=player.root.position.y;
+scene.userData.nearbySettlements=placeNearbySettlements({actors,definitions:world.actors,surface,spawn,seed:worldSeed});
+for(const a of actors)if(['cabin','village'].includes(a.type)){cameraObstacles.push(new THREE.Box3().setFromObject(a.root));register(a);}
 scene.matrixWorldAutoUpdate=false;
 for(const a of actors){
   const box=new THREE.Box3().setFromObject(a.root);
@@ -236,8 +258,19 @@ foxDens=createFoxDens({camera,player,keys,locations:habitatLocations,getYaw:()=>
 teleportLocations=[{name:'Starting area',position:spawn},...habitatLocations,
   ...world.actors.filter(a=>a.type==='cabin'||a.type==='village').map((a,i)=>({name:`${a.type==='cabin'?'Cabin':'Village'} ${i+1}`,position:a.position}))];
 teleportLocations.forEach((location,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=location.name||`${location.type==='fox_den'?'Fox den':'Penguin nest'} ${i}`;$('destination').append(option);});
-waypointHUD=createWaypoints({camera,getPlayer:()=>spectating?{root:{position:spectatorPosition}}:player,waypoints:habitatLocations});
-wildlifeStream=createWildlifeStream({scene,surface,actors,assets,definitions:world.actors,obstacles:cameraObstacles,seed:worldSeed});
+function tentWaypoint(tent){
+  const index=camping.tentIndex(tent);
+  // Front threshold in model coordinates; includes terrain slope and tent scale.
+  tent.mesh.updateWorldMatrix(true,false);
+  const entrance=tent.mesh.localToWorld(new THREE.Vector3(0,0,1.35));
+  return {id:`${worldSeed}:tent:${index}`,type:'tent',name:`Tent ${index+1}`,position:entrance.toArray()};
+}
+waypointHUD=createWaypoints({
+  camera,getPlayer:()=>spectating?{root:{position:spectatorPosition}}:player,
+  waypoints:[...habitatLocations,...camping.tents().map(tentWaypoint)],
+  subscribe:add=>camping.subscribeTentPlaced(tent=>add(tentWaypoint(tent))),
+});
+wildlifeStream=createWildlifeStream({scene,surface,actors,assets,definitions:world.actors,obstacles:cameraObstacles,habitats:habitatLocations,seed:worldSeed});
 ready=true;
 player.inventory=inventory;
 inventoryUI.setEnabled(true);
@@ -272,13 +305,14 @@ function frame(){
   // Read actual enclosure, not the tent's entry/exit transition flag.
   // Cold shares movement's bounded active game time, not elapsed wall time.
   cold.update(now,dt,ready&&locked&&!inventoryUI.isOpen()&&!document.hidden&&document.hasFocus()&&!spectating,
-    tentInterior?.inside()?'tent':foxDens?.active()?'den':null,
+    tentInterior?.inside()?(camping.hasIndoorBag(tentInterior.occupiedTentIndex())?'equipped-tent':'tent'):foxDens?.active()?'den':null,
     !ready?'Loading':spectating?'Spectator':'Paused');
   if(cold.dead())return;
-  if(ready&&foxDens?.active()){
+  if(ready&&!spectating&&foxDens?.active()){
     waypointHUD?.setVisible(false);foxDens.update(dt,locked&&!inventoryUI.isOpen());renderer.render(foxDens.scene(),camera);return;
   }
   if(ready&&spectating){
+    tentInterior?.hide();
     foxDens?.hide();
     updateSpectator(dt);
     if(locked){wildlifeStream?.update(dt,spectatorPosition);updateWildlife(dt,spectatorPosition);}

@@ -1,3 +1,4 @@
+import { hudHint } from './cold.js';
 import * as THREE from 'three';
 import { createTentDoor, animateTentDoor } from './tent-door.js';
 
@@ -19,9 +20,10 @@ export function createTentInterior({world,player,camera,camping,keys,getYaw,setY
   interiorDoorMount.position.z=2.5;interiorDoorMount.add(interiorDoor);room.add(interiorDoorMount);
   box(2,.015,1.3,0,.01,2.6,new THREE.MeshStandardMaterial({color:0x876b43}));
   const lantern=box(.22,.35,.22,0,3.1,0,new THREE.MeshStandardMaterial({color:0xffd084,emissive:0xffac40,emissiveIntensity:1.5}));
-  const prompt=document.createElement('div');prompt.style.cssText='position:fixed;bottom:72px;left:50%;transform:translateX(-50%);padding:12px 20px;background:#17252de8;color:#fff;border-radius:8px;pointer-events:none';prompt.hidden=true;document.body.append(prompt);
+  const prompt=document.createElement('div');prompt.className='context-hint';prompt.hidden=true;document.body.append(prompt);
   const fade=document.createElement('div');fade.style.cssText='position:fixed;inset:0;background:#100e0b;opacity:0;pointer-events:none;z-index:5';document.body.append(fade);
   let inside=false,transition=null,nearby=null,home=null,activeTent=null;
+  let activeTentIndex=null;
   const local=new THREE.Vector3(),forward=new THREE.Vector3(),right=new THREE.Vector3(),move=new THREE.Vector3();
   function pose(name){const clip=player.clips.find(c=>c.name===`Human_${name}`);if(!clip||player.clip===clip.name)return;player.action?.fadeOut(.15);player.action=player.mixer.clipAction(clip);player.action.reset().setEffectiveTimeScale(1).fadeIn(.15).play();player.clip=clip.name;}
   function door(progress,closing=false){
@@ -39,23 +41,27 @@ export function createTentInterior({world,player,camera,camping,keys,getYaw,setY
   }
   function refreshPrompt(){
     if(transition){prompt.hidden=true;return;}
-    if(inside){nearby=Math.abs(player.root.position.x)<1.5&&player.root.position.z>2.2;prompt.textContent='F · Unzip and step outside';}
+    if(inside){nearby=Math.abs(player.root.position.x)<1.5&&player.root.position.z>2.2;hudHint(prompt,'enter','F · Exit tent','F · Unzip and step outside');}
     else{
       nearby=null;
       if(!camping.active()&&!camping.busy())for(const tent of camping.tents()){
         local.copy(player.root.position);tent.mesh.worldToLocal(local);
         if(Math.abs(local.x)<.75&&local.z>1.25&&local.z<2.6&&Math.abs(local.y)<1){nearby=tent;break;}
       }
-      prompt.textContent='F · Unzip and enter tent';
+      hudHint(prompt,'tent','F · Enter tent','F · Unzip and enter tent. Exposure continues until inside.');
     }
     prompt.hidden=!nearby;
   }
   return {
     inside:()=>inside,active:()=>inside||Boolean(transition),scene:()=>inside?room:world,
+    transitioning:()=>Boolean(transition),
+    spectatorOrigin:()=>inside?home.position.clone():null,
+    hide(){prompt.hidden=true;},
+    occupiedTentIndex:()=>inside?activeTentIndex:null,
     placementContext:()=>inside&&!transition?{scene:room,tentIndex:camping.tentIndex(activeTent)}:null,
     interact(){refreshPrompt();if(!nearby||transition)return;
       camping.cancel();
-      if(!inside){activeTent=nearby;home={position:player.root.position.clone(),rotation:player.root.rotation.y,yaw:getYaw()};}
+      if(!inside){activeTent=nearby;activeTentIndex=camping.tentIndex(activeTent);home={position:player.root.position.clone(),rotation:player.root.rotation.y,yaw:getYaw()};}
       keys.clear();pose('Idle');transition={time:0,switched:false};prompt.hidden=true;
     },
     blocks(x,z){for(const tent of camping.tents()){

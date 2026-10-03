@@ -46,3 +46,28 @@
 @media (max-width: 340px) {
   .inventory-slots, .inventory-capacity { grid-template-columns: 1fr; }
 }
+
+/* Compact gameplay HUD: below menus and dialogs, above world markers. */
+.hud-icon{width:20px;height:20px;flex:0 0 20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.hud-tip{position:relative;display:inline-flex;align-items:center;gap:7px;pointer-events:auto}
+.hud-tip:focus-visible{outline:2px solid #edf8ff;outline-offset:3px}
+.hud-tooltip{display:none;position:absolute;left:0;bottom:calc(100% + 8px);width:min(300px,80vw);padding:10px;border:1px solid #78909c;border-radius:6px;background:#0b1c27;color:#eef5f5;font:12px/1.5 system-ui;text-align:left;white-space:normal;z-index:10}
+.hud-tip:hover>.hud-tooltip,.hud-tip:focus-visible>.hud-tooltip{display:block}
+.hud-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.cold-widget{position:fixed;top:12px;left:12px;z-index:4;display:grid;gap:3px;width:205px;padding:10px;border:1px solid #80959f;border-radius:8px;background:#07141eed;color:#eef5f5;font:12px/1.4 system-ui;font-variant-numeric:tabular-nums}
+.cold-widget small{padding-left:27px;color:#bdced5;font-size:10px}
+.cold-widget meter{width:100%;height:10px;accent-color:#eef5f5}
+.cold-widget[data-severity=warning]{border-style:dashed}
+.cold-widget[data-severity=urgent]{border:3px double #fff}
+.cold-widget .hud-tooltip{bottom:auto;top:calc(100% + 8px)}
+button.inventory-hud{position:fixed;top:44px;left:auto;right:12px;z-index:4;min-height:40px;padding:8px 10px}
+.inventory-hud .hud-tooltip{left:auto;right:0;bottom:auto;top:calc(100% + 8px)}
+body #help{bottom:12px;left:12px;right:12px;display:flex;justify-content:center;flex-wrap:wrap;gap:5px;padding:0;background:none;z-index:4;pointer-events:none}
+#help>.hud-tip{padding:7px 9px;border:1px solid #78909c55;border-radius:6px;background:#07141ee8;font:11px system-ui}
+#help>.hud-tip:nth-last-child(-n+3) .hud-tooltip{left:auto;right:0}
+.context-hint,.camping-hint{position:fixed;bottom:108px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:9px 12px;border:1px solid #78909c;border-radius:7px;background:#07141eed;color:#eef5f5;font:12px/1.5 system-ui;text-align:center;z-index:4}
+.camping-hint{bottom:150px;width:max-content;max-width:min(460px,calc(100vw - 24px))}
+.context-hint .hud-tooltip,.camping-hint .hud-tooltip{left:50%;transform:translateX(-50%)}
+body #performance{top:12px!important;right:12px!important;font-size:10px!important;z-index:4}
+.survival-guide{text-align:left;color:#bdced5;font-size:12px;margin-top:16px}.survival-guide summary{cursor:pointer}
+@media(max-width:420px){.cold-widget{width:185px;font-size:11px}#help>.hud-tip{padding:5px 7px}.hud-icon{width:18px;height:18px;flex-basis:18px}}

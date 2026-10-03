@@ -21,7 +21,7 @@ function randomFor(key) {
  * Returns originals plus actual mesh entrance waypoints, in world metres.
  * The saved 4 dens + 1 colony remain: add 36 + 9, not 40 + 10.
  * Each base has ten deterministic slots (legacy slot zero, variants 1..9).
- * New centres use spawn + (base - spawn) * .1, with bounded local searching.
+ * Starter entrances use 100–300 m distances; other sites link from accepted dens.
  * Original terrain sites cannot be compressed without editing saved terrain.
  * No terrain mutation, wildlife spawning, collision registration or frame hook.
  * scene.userData.habitatDensity exposes counts, omissions and dispose().
@@ -99,36 +99,76 @@ export function createHabitatDensity({ scene, surface, waypoints, spawn, seed=0 
     }
     return y;
   }
+  const slots = [];
   for (const type of TYPES) {
     const sources = bases.filter(point => point.type === type);
     let remaining = Math.max(0, TARGETS[type] - sources.length);
     for (const [baseIndex, base] of sources.entries()) {
       const count = Math.min(9, Math.ceil(remaining / (sources.length - baseIndex)));
       remaining -= count;
-      const cx = origin[0] + (base.position[0] - origin[0]) * .1;
-      const cz = origin[2] + (base.position[2] - origin[2]) * .1;
       for (let variant = 1; variant <= count; variant++) {
+        slots.push({ type, base, variant });
+      }
+    }
+    if (remaining) missing.push(`${type}: ${remaining} slots lack base waypoints`);
+  }
+  const ordered = [];
+  for (const type of ['fox_den', 'penguin_nest', 'fox_den', 'penguin_nest', 'fox_den', 'fox_den']) {
+    const index = slots.findIndex(slot => slot.type === type);
+    if (index >= 0) ordered.push({ ...slots.splice(index, 1)[0], starter: true });
+  }
+  const reservedCount = ordered.length;
+  ordered.push(...slots);
+  const starterTargets = { fox_den: 4, penguin_nest: 2 };
+  const starterSuccesses = { fox_den: 0, penguin_nest: 0 };
+  // Spend at most twelve existing slots per species on starter replacements.
+  // Each slot still has 320 attempts; failed slots never get an unsafe fallback.
+  const starterAttempts = { fox_den: 0, penguin_nest: 0 };
+  const replacements = [];
+  for (const type of ['fox_den', 'penguin_nest']) {
+    replacements.push(...slots.filter(slot => slot.type === type).slice(0, 12 - starterTargets[type]));
+  }
+  const replacementSet = new Set(replacements);
+  ordered.splice(reservedCount, ordered.length - reservedCount, ...replacements, ...slots.filter(slot => !replacementSet.has(slot)));
+  for (const [slotIndex, { type, base, variant }] of ordered.entries()) {
+        const starter = starterSuccesses[type] < starterTargets[type] && starterAttempts[type] < 12;
+        if (starter) starterAttempts[type]++;
         const id = `${base.id}__density_${variant}`;
         if (ids.has(id)) { missing.push(id); continue; }
-        const random = randomFor(`${seed}:${id}`), phase = random() * TAU;
+        const random = randomFor(`${seed}:${id}`), phase = random() * TAU, yaw = random() * TAU;
+        const entranceZ = type === 'fox_den' ? 1.5 : 6.8;
+        const sector = slotIndex % 4;
+        const anchors = starter ? [{ x: origin[0], y: origin[1], z: origin[2] }] :
+          plans.filter(p => p.type === 'fox_den').sort((a, b) => {
+            const bearing = p => Math.atan2(p.entrance.z - origin[2], p.entrance.x - origin[0]);
+            const alignment = p => Math.cos(bearing(p) - sector * Math.PI / 2);
+            return alignment(b) - alignment(a);
+          }).slice(0, 4).map(p => p.entrance);
         let plan;
-        // Bounded to 220 m from compressed base; never fall back to distant land.
+        // Sample support only: these links are not a proof of a walkable route.
         for (let attempt = 0; attempt < 320; attempt++) {
+          if (!anchors.length) break;
+          const anchor = anchors[attempt % anchors.length];
           const angle = phase + attempt * 2.399963229728653;
-          const radius = 36 + 184 * Math.sqrt(attempt / 319);
-          const x = cx + Math.cos(angle) * radius, z = cz + Math.sin(angle) * radius;
+          const radius = 110 + 175 * Math.sqrt(attempt / 319);
+          const ex = anchor.x + Math.cos(angle) * radius, ez = anchor.z + Math.sin(angle) * radius;
+          if (!starter && Math.hypot(ex - origin[0], ez - origin[2]) < 320) continue;
+          const x = ex - Math.sin(yaw) * entranceZ, z = ez - Math.cos(yaw) * entranceZ;
           const y = validate(x, z);
           if (y === null) continue;
-          plan = { id, type, baseId: base.id, variant, x, y, z, yaw: random() * TAU };
+          const ey = surface.height(ex, ez);
+          if (!Number.isFinite(ey)) continue;
+          const distance = Math.hypot(ex - anchor.x, ey - anchor.y, ez - anchor.z);
+          if (distance < 100 || distance > 300) continue;
+          plan = { id, type, baseId: base.id, variant, x, y, z, yaw, starter,
+            entrance: { x: ex, y: ey, z: ez } };
           plans.push(plan);
+          if (starter) starterSuccesses[type]++;
           occupied.push({ x, z, radius: 12 });
           ids.add(id);
           break;
         }
         if (!plan) missing.push(id);
-      }
-    }
-    if (remaining) missing.push(`${type}: ${remaining} slots lack base waypoints`);
   }
 
   const root = new THREE.Group();
@@ -307,7 +347,8 @@ export function createHabitatDensity({ scene, surface, waypoints, spawn, seed=0 
   const combined = [...originals, ...generated];
   const counts = Object.fromEntries(TYPES.map(type => [type, combined.filter(point => point.type === type).length]));
   scene.userData.habitatDensity = { root, counts, added: generated.length, missing, dispose,
-    iceChecked: terrain.length > 0, extentScale: .1, searchRadius: 220 };
+    iceChecked: terrain.length > 0, linkRange: [100, 300],
+    starterCounts: Object.fromEntries(TYPES.map(type => [type, plans.filter(p => p.starter && p.type === type).length])) };
   installed.set(scene, combined);
   if (TYPES.some(type => counts[type] !== TARGETS[type])) {
     console.warn('[habitat-density] Safe placement shortfall; retained real sites only.', { counts, targets: TARGETS, missing });

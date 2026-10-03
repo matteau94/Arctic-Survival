@@ -7,6 +7,7 @@ const files = new Set(['viewer/index.html', 'viewer/app.js', 'viewer/gameplay.js
 if(fs.existsSync(path.join(root,'viewer/data/tent-door.glb')))files.add('viewer/data/tent-door.glb');
 for(const file of ['viewer/waypoints.js','viewer/waypoints.css','viewer/data/waypoints.json'])files.add(file);
 files.add('viewer/habitat-density.js');
+files.add('viewer/nearby-settlements.js');
 files.add('viewer/fox-dens.js');
 files.add('viewer/wildlife-stream.js');
 files.add('viewer/world-seed.js');

@@ -1,3 +1,4 @@
+import { hudHint } from './cold.js';
 import * as THREE from 'three';
 import { startTentSetup } from './tent-setup.js';
 import { createTentDoor } from './tent-door.js';
@@ -48,9 +49,11 @@ function campModel(id,preview=false){
 
 export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacles,canPlace=()=>true,getInterior=()=>null}){
   const placed=[];
+  const tentListeners=new Set();
+  const equippedTents=new Set(); // Updated only when a committed indoor bag is added.
   let ghost=null,item=null,rotation=0,candidate=null,valid=false,setup=null;
   const hint=document.createElement('div');
-  hint.style.cssText='position:fixed;left:50%;top:80px;transform:translateX(-50%);max-width:90vw;padding:12px 18px;background:#081b29e8;color:white;border:1px solid #8cbdc7;border-radius:8px;text-align:center;pointer-events:none;z-index:1;font:14px system-ui';
+  hint.className='camping-hint';
   hint.hidden=true;hint.setAttribute('role','status');document.body.append(hint);
   function transform(mesh,p){
     mesh.position.set(p.x,p.y+.035,p.z);
@@ -66,6 +69,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     if(p.tentIndex===undefined)scene.add(mesh);
     else{const interior=getInterior();if(interior?.tentIndex===p.tentIndex)interior.scene.add(mesh);}
     placed.push({data:p,mesh});
+    if(p.id==='sleeping-bag'&&p.tentIndex!==undefined)equippedTents.add(p.tentIndex);
   }
   for(const p of inventory.snapshot().placements)add(p);
   function disposeGhost(){
@@ -95,7 +99,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
       for(const existing of placed)if(existing.data.tentIndex===p.tentIndex&&new THREE.Box3().setFromObject(existing.mesh).intersectsBox(bounds))valid=false;
       ghost.traverse(o=>{if(o.isMesh)o.material.color.set(valid?0x70e7b0:0xef6464);});
       candidate=p;
-      hint.textContent=`Sleeping bag · ${valid?'Click to place':'Choose clear floor space away from walls and the doorway'} · R rotate · Esc cancel`;
+      hudHint(hint,'warm',`${valid?'Click · Place bag':'Clear floor needed'} · R ↻ · Esc × · Permanent`,`${valid?'Ready to place sleeping bag.':'Cannot place: clear floor needed away from walls, doorway, player and other equipment.'} Indoor bags restore warmth; bare tents only block cold. Placement is permanent. R rotates; Esc cancels.`);
       return;
     }
     const yaw=getYaw(),distance=item==='tent'?4.5:3.5;
@@ -129,11 +133,16 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     }
     ghost.traverse(o=>{if(o.isMesh)o.material.color.set(valid?0x70e7b0:0xef6464);});
     candidate=p;
-    hint.textContent=`${item==='tent'?'Small tent':'Sleeping bag'} · ${valid?'Click to place':'Choose dry, clear, gently sloping ground'} · R rotate · Esc cancel`;
+    hudHint(hint,item==='tent'?'tent':'warm',`${valid?'Click · Place':'Clear ground needed'} · R ↻ · Esc × · Permanent · Still exposed`,`${valid?'Ready to place.':'Cannot place: choose dry, clear, gently sloping ground.'} Bare tents only block cold; indoor sleeping bags restore warmth. Outdoor bags give no warmth. Placement is permanent. R rotates; Esc cancels. Setup, positioning and entry take time: remain exposed until inside.`);
   }
   return {
     tents:()=>placed.filter(p=>p.data.id==='tent'),
+    subscribeTentPlaced(callback){
+      tentListeners.add(callback);
+      return ()=>tentListeners.delete(callback);
+    },
     tentIndex:tent=>placed.indexOf(tent),
+    hasIndoorBag:tentIndex=>equippedTents.has(tentIndex),
     showInterior(room,tentIndex){
       for(const entry of placed)if(entry.data.tentIndex!==undefined){room.add(entry.mesh);entry.mesh.visible=entry.data.tentIndex===tentIndex;}
     },
@@ -141,7 +150,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     active:()=>Boolean(item),cancel,update,
     busy:()=>Boolean(setup),
     beforeFrame(){setup?.beforeFrame();},
-    tick(dt){if(setup){const label=setup.tick(dt);if(setup&&label)hint.textContent=label;}},
+    tick(dt){if(setup){const label=setup.tick(dt);if(setup&&label)hudHint(hint,'tent',`${label.split(' · ').slice(1).join(' · ')} · Still exposed`,`${label}. Remain exposed until inside.`);}},
     rotate(){rotation+=Math.PI/4;update();},
     place(){
       if(setup)return;
@@ -156,7 +165,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
         for(let i=1;i<=20;i++){
           const x=THREE.MathUtils.lerp(start.x,end.x,i/20),z=THREE.MathUtils.lerp(start.z,end.z,i/20),h=surface.height(x,z);
           if(!Number.isFinite(h)||h<=0||Math.abs(h-previousHeight)>.2||obstacles.some(b=>x>b.min.x-.5&&x<b.max.x+.5&&z>b.min.z-.5&&z<b.max.z+.5)){
-            hint.textContent='Move closer to a clear, gentle approach before setting up the tent.';return;
+            hudHint(hint,'tent','Move closer · Clear approach needed','Move closer to a clear, gentle approach before setting up the tent.');return;
           }
           previousHeight=h;
         }
@@ -167,14 +176,19 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
           onCancel:()=>{removeTent();hint.hidden=true;},
           onComplete:()=>{
             setup=null;const result=inventory.deploy(id,p);
-            if(result.ok){placed.push({data:{id,...p},mesh:tent});hint.hidden=true;}
-            else{removeTent();hint.textContent=result.message;}
+            if(result.ok){
+              const entry={data:{id,...p},mesh:tent};placed.push(entry);hint.hidden=true;
+              for(const callback of tentListeners){
+                try{callback(entry);}catch(error){console.error('Tent placement listener failed',error);}
+              }
+            }
+            else{removeTent();hudHint(hint,'tent',result.message);}
           },
         });
         return;
       }
       const result=inventory.deploy(id,p);
-      if(!result.ok){hint.textContent=result.message;return;}
+      if(!result.ok){hudHint(hint,'tent',result.message);return;}
       add({id,...p});cancel();
     },
   };

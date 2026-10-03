@@ -4,10 +4,53 @@ import { register, unregister } from './gameplay.js';
 
 const TYPES=new Set(['fox','penguin','bear','fish','orca']);
 const CELL=500,MAX_ACTIVE=120;
-export function createWildlifeStream({scene,surface,actors,assets,definitions,obstacles,seed:worldSeed=0}){
+export function createWildlifeStream({scene,surface,actors,assets,definitions,obstacles,habitats=[],seed:worldSeed=0}){
   const templates=new Map();
   for(const data of definitions)if(TYPES.has(data.type)&&!templates.has(data.type))templates.set(data.type,data);
   const authored=definitions.filter(a=>TYPES.has(a.type));
+  const habitatAnimals=[];
+  const habitatBounds=scene.getObjectByName('habitat-density')?.children.map(root=>new THREE.Box3().setFromObject(root))||[];
+  const occupied=[];
+  const exclusionBounds=[...obstacles,...habitatBounds];
+  function reserved(x,z,radius){
+    return habitats.some(p=>Math.hypot(x-p.position[0],z-p.position[2])<24+radius)||
+      authored.some(p=>Math.hypot(x-p.position[0],z-p.position[2])<radius+12)||
+      exclusionBounds.some(b=>x+radius+6>b.min.x&&x-radius-6<b.max.x&&z+radius+6>b.min.z&&z-radius-6<b.max.z)||
+      occupied.some(p=>Math.hypot(x-p.x,z-p.z)<radius+p.radius+4);
+  }
+  const radii=new Map();
+  for(const [type,template] of templates){
+    const asset=assets.get(template.asset);if(!asset)continue;
+    const b=new THREE.Box3().setFromObject(asset.scene);
+    const radius=Math.hypot(Math.max(Math.abs(b.min.x),Math.abs(b.max.x)),
+      Math.max(Math.abs(b.min.z),Math.abs(b.max.z)))*Math.abs(template.scale??1)+2;
+    if(Number.isFinite(radius))radii.set(type,radius);
+  }
+  for(const site of habitats.filter(p=>String(p.id).includes('__density_'))){
+    const type=site.type==='fox_den'?'fox':'penguin',template=templates.get(type);
+    if(!template)continue;
+    // Radius about asset origin covers rotations and off-centre loaded geometry.
+    const radius=radii.get(type);
+    if(!Number.isFinite(radius)||radius>12)continue;
+    let seed=worldSeed;
+    for(const character of String(site.id))seed=Math.imul(seed^character.charCodeAt(0),16777619);
+    const phase=(seed>>>0)/4294967296*Math.PI*2;
+    for(let i=0;i<(type==='fox'?1:2);i++)for(let attempt=0;attempt<48;attempt++){
+      const angle=phase+(attempt+i*17)*2.399963229728653;
+      const distance=32+attempt*.5;
+      const x=site.position[0]+Math.cos(angle)*distance,z=site.position[2]+Math.sin(angle)*distance;
+      if(reserved(x,z,radius))continue;
+      const h=surface.height(x,z);if(!Number.isFinite(h)||h<=2)continue;
+      let safe=true;
+      for(let dx=-radius;dx<=radius;dx+=radius)for(let dz=-radius;dz<=radius;dz+=radius){
+        const floor=surface.height(x+dx,z+dz);
+        if(!Number.isFinite(floor)||floor<=2||Math.abs(floor-h)>.35)safe=false;
+      }
+      if(!safe)continue;
+      habitatAnimals.push({...template,id:`habitat:${site.id}:${i}`,position:[x,h,z],rotation:angle,ground:undefined});
+      occupied.push({x,z,radius});break;
+    }
+  }
   const active=new Map(),cells=new Map();
   let elapsed=1,queue=[],lastCell='';
   function remove(a){
@@ -33,7 +76,8 @@ export function createWildlifeStream({scene,surface,actors,assets,definitions,ob
         const template=templates.get(type);if(!template)continue;
         const y=water?Math.max(h+4,-12):h;
         if(type==='orca'&&h>-20)continue;
-        if(obstacles.some(b=>x>b.min.x-8&&x<b.max.x+8&&z>b.min.z-8&&z<b.max.z+8))continue;
+        const radius=radii.get(type);
+        if(!Number.isFinite(radius)||reserved(x,z,radius))continue;
         result.push({...template,id:`stream:${cx}:${cz}:${i}`,position:[x,y,z],rotation:random()*Math.PI*2,ground:undefined});break;
       }
     }
@@ -65,7 +109,7 @@ export function createWildlifeStream({scene,surface,actors,assets,definitions,ob
         const key=`${x},${z}`;wanted.add(key);if(!cells.has(key))cells.set(key,plan(x,z));
       }
       for(const key of cells.keys())if(!wanted.has(key))cells.delete(key);
-      const candidates=[...authored,...[...cells.values()].flat()].filter(d=>Math.hypot(d.position[0]-focus.x,d.position[2]-focus.z)<1100);
+      const candidates=[...authored,...habitatAnimals,...[...cells.values()].flat()].filter(d=>Math.hypot(d.position[0]-focus.x,d.position[2]-focus.z)<1100);
       candidates.sort((a,b)=>Math.hypot(a.position[0]-focus.x,a.position[2]-focus.z)-Math.hypot(b.position[0]-focus.x,b.position[2]-focus.z));
       const selected=candidates.slice(0,MAX_ACTIVE),ids=new Set(selected.map(d=>d.id));
       for(const [id,a] of active)if(!ids.has(id)){remove(a);active.delete(id);}

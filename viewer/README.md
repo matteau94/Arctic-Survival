@@ -6,11 +6,14 @@ Exposure starts at 0 and increases by 1 per active outdoor game second. At 360
 the expedition ends from cold. Cold shares movement's delta capped at 0.05 seconds
 per frame: at 10 FPS, six game minutes take about twelve real minutes. The HUD
 shows exposure and approximate remaining outdoor game time to one decimal
-second at each update (at most once per second), with warnings
+second at each update (at most once per second except immediate shelter/pause state changes), with warnings
 at 120 and 240. Use E to place your tent, then approach its zipper and press F,
-or approach a fox den entrance and press F. A tent interior recovers 3 exposure
-seconds per active game second; a den interior recovers 1, down to 0. Sleeping bags
-do not provide recovery. Setup and door entry count outdoors until actually
+or approach a fox den entrance and press F. A bare tent holds exposure steady without
+recovering. Inside, use E → Sleeping bag → Place to enable recovery of 3 exposure
+seconds per active game second in that tent; a den interior recovers 1, down to 0.
+Bags in inventory, previews, outdoors or another tent do not warm the occupied tent.
+Deployed gear cannot be packed up or moved during the expedition.
+Setup and door entry count outdoors until actually
 inside; exiting uses the actual inside state too. Setup plus the entry transition
 to inside takes 11.15 game seconds, plus positioning time; this is not a guaranteed
 rescue duration. There are no movement penalties.
@@ -61,10 +64,10 @@ and releases the cursor. Close it with **E**, **Esc**, or **Close**, then click
 **Resume expedition** to continue.
 
 You start with a small tent and sleeping bag. Select either in **Inventory**,
-then **Place on ground**. Look and move to position the preview in front of you,
+then **Place**. Look and move to position the preview in front of you,
 press **R** to rotate, and click when it is green to place. **Esc** cancels without
 using the item. Placement needs dry, clear, gently sloping ground; a sleeping bag
-can fit inside the tent. Placement removes one item from the backpack and keeps
+must be placed from inside the tent to provide warmth. Placement removes one item from the backpack and keeps
 the campsite only for the current session. Reloading starts a fresh world with
 fresh starter supplies, including the tent and sleeping bag; previous camps are cleared.
 Sleeping effects, packing up, consuming supplies, and gathering are not implemented.
@@ -108,4 +111,4 @@ The browser uses the original GLB files and locally stored Three.js 0.170.0 modu
 The server binds only to the local computer and permits viewer files and the eight
 asset GLBs, rather than exposing the entire project directory.
 
-Walk to the tent's front zipper and press **F** to unzip and enter a separate, warmly lit 7 x 8 metre interior. Use WASD or arrows to walk inside. Approach the interior zipper and press **F** to return to your entry position outside. E still opens inventory; camping equipment placement is currently outdoors only. Tent walls block walking through the canvas. Reloading starts outdoors in a fresh world with fresh starter supplies; previous tents do not remain.
+Walk to the tent's front zipper and press **F** to unzip and enter a separate, warmly lit 7 x 8 metre interior. Use WASD or arrows to walk inside. Approach the interior zipper and press **F** to return to your entry position outside. E opens inventory; place your sleeping bag inside to restore warmth. The bare tent only prevents further cold exposure. Tent walls block walking through the canvas. Reloading starts outdoors in a fresh world with fresh starter supplies; previous tents do not remain.
