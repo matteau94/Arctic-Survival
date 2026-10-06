@@ -2,7 +2,7 @@ import { hudHint } from './cold.js';
 let nextInventoryId = 0;
 
 /** The parent owns keyboard shortcuts, pointer lock, and the CSS link. */
-export function createInventoryUI({ inventory, onClose, onOpen, onPlace, canPlace=()=>true }) {
+export function createInventoryUI({ inventory, onClose, onOpen, onPlace, canPlace=()=>true, heldFood, heldAxe, canHold=()=>true }) {
   const prefix = `inventory-${++nextInventoryId}`;
   let enabled = false;
   let selectedId = null;
@@ -117,6 +117,23 @@ export function createInventoryUI({ inventory, onClose, onOpen, onPlace, canPlac
         element('p', 'inventory-category', selected.category || 'Item'),
         element('p', '', selected.description || 'No description available.'),
         element('p', 'inventory-item-meta', `Quantity: ${format(selected.quantity)} · ${format(selected.unitWeight)} kg each`));
+      if(heldFood&&selected.id==='food'&&selected.category==='food'){
+        const holding=heldFood.heldId()===selected.id;
+        const holdButton=button(holding?'Put away':'Hold',()=>{
+          const result=heldFood.toggle(selected.id);
+          render();status.textContent=result.message;
+        },'hold');
+        holdButton.disabled=!holding&&!canHold();
+        details.append(holdButton,element('p','',holding?'Held in your right hand. Still counted in your backpack.':'Hold a wrapped ration without consuming it.'));
+      }
+      if(heldAxe&&selected.id==='handaxe'){
+        const holding=snapshot.heldId==='handaxe';
+        const equip=button(holding?'Put away':'Equip / Hold',()=>{
+          const result=heldAxe.toggle();render();status.textContent=result.message;
+        },'hold');
+        equip.disabled=!holding&&!heldAxe.canEquip();
+        details.append(equip,element('p','',holding?'Left click near a trunk outdoors to swing. E → Handaxe → Put away.':'Equipping replaces held food without consuming it.'));
+      }
       if(onPlace&&['tent','sleeping-bag'].includes(selected.id)){
         const placeButton=button('Place',()=>{if(!canPlace(selected.id))return;const id=selected.id;close();onPlace(id);},'place');
         placeButton.disabled=!canPlace(selected.id);details.append(placeButton);

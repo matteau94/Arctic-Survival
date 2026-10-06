@@ -4,7 +4,7 @@ import { register, unregister } from './gameplay.js';
 
 const TYPES=new Set(['fox','penguin','bear','fish','orca']);
 const CELL=500,MAX_ACTIVE=120;
-export function createWildlifeStream({scene,surface,actors,assets,definitions,obstacles,habitats=[],seed:worldSeed=0}){
+export function createWildlifeStream({scene,surface,actors,assets,definitions,obstacles,habitats=[],seed:worldSeed=0,taming=null,treeOverlap=()=>false}){
   const templates=new Map();
   for(const data of definitions)if(TYPES.has(data.type)&&!templates.has(data.type))templates.set(data.type,data);
   const authored=definitions.filter(a=>TYPES.has(a.type));
@@ -52,8 +52,11 @@ export function createWildlifeStream({scene,surface,actors,assets,definitions,ob
     }
   }
   const active=new Map(),cells=new Map();
+  const summoned=new Map();
+  let summonSerial=0;
   let elapsed=1,queue=[],lastCell='';
   function remove(a){
+    taming?.detach(a);
     unregister(a);a.mixer.stopAllAction();a.mixer.uncacheRoot(a.root.children[0]);
     // Skeletons belong to each clone; geometry, textures and materials are shared.
     a.root.traverse(o=>{if(o.isSkinnedMesh)o.skeleton.dispose();});
@@ -84,6 +87,14 @@ export function createWildlifeStream({scene,surface,actors,assets,definitions,ob
     return result;
   }
   function add(data){
+    // All admissions (including authored animals and queued summons) must keep
+    // resident companions' outdoor return footprints clear while spectating.
+    const templateScale=Math.abs(templates.get(data.type)?.scale??1)||1;
+    const reservedRadius=(radii.get(data.type)??40)*Math.max(1,Math.abs(data.scale??1)/templateScale);
+    if(taming?.blocksOutdoor?.(data.position[0],data.position[2],{renderRadius:reservedRadius}))return;
+    if(!['fish','orca'].includes(data.type)&&treeOverlap(new THREE.Box3(
+      new THREE.Vector3(data.position[0]-reservedRadius,data.position[1]-.5,data.position[2]-reservedRadius),
+      new THREE.Vector3(data.position[0]+reservedRadius,data.position[1]+reservedRadius*2+3,data.position[2]+reservedRadius))))return;
     const gltf=assets.get(data.asset);if(!gltf)return;
     const model=clone(gltf.scene);model.traverse(o=>{if(/icosphere/i.test(o.name))o.visible=false;});
     const root=new THREE.Group();root.add(model);root.position.fromArray(data.position);root.rotation.y=data.rotation||0;root.scale.setScalar(data.scale??1);
@@ -98,9 +109,40 @@ export function createWildlifeStream({scene,surface,actors,assets,definitions,ob
       if(floor!==null){root.position.y+=floor-bounds.min.y+.02;root.updateMatrixWorld(true);}
     }
     a.renderRadius=bounds.getSize(new THREE.Vector3()).length();
+    // Return-search broadphase only: include the root-to-model offset, then
+    // two full diagonals plus 4 m of pose slack. Unknown bounds are not culled.
+    a.companionBroadphaseRadius=Math.max(4,Math.hypot(
+      Math.max(Math.abs(bounds.min.x-root.position.x),Math.abs(bounds.max.x-root.position.x)),
+      Math.max(Math.abs(bounds.min.z-root.position.z),Math.abs(bounds.max.z-root.position.z)))+2*a.renderRadius+4);
     scene.add(root);root.updateMatrixWorld(true);actors.push(a);register(a);active.set(data.id,a);
+    taming?.admit(a,data);
   }
-  return {update(dt,focus){
+  return {
+    summonOverlaps(x,z,radius){return [...summoned.values()].some(d=>{
+      const p=active.get(d.id)?.root.position;
+      return Math.hypot(x-(p?.x??d.position[0]),z-(p?.z??d.position[2]))<radius+(radii.get(d.type)??40)+4;
+    });},
+    summon(type,focus,yaw,safeGround){
+      if(!['fox','penguin','bear'].includes(type))return 'Unsupported animal. Use fox, penguin or bear.';
+      if(summoned.size>=8)return 'Summon limit reached (8 pending or live). Travel beyond 1100 m to release old summons.';
+      const template=templates.get(type),radius=radii.get(type);
+      if(!template||!assets.has(template.asset)||!Number.isFinite(radius)||radius>40)return 'No safely sized loaded template is available for that animal.';
+      for(let attempt=0;attempt<32;attempt++){
+        const angle=yaw+attempt*2.399963229728653,distance=radius+14+attempt*2;
+        const x=focus.x+Math.sin(angle)*distance,z=focus.z+Math.cos(angle)*distance;
+        if(reserved(x,z,radius))continue;
+        if(summoned.size&&[...summoned.values()].some(d=>Math.hypot(x-d.position[0],z-d.position[2])<radius+(radii.get(d.type)??40)+4))continue;
+        const y=safeGround(x,z,radius);
+        if(y===null)continue;
+        const id=`summon:${++summonSerial}`;
+        summoned.set(id,{...template,id,position:[x,y,z],rotation:angle,ground:undefined});
+        elapsed=1;
+        return `Queued ${type} at ${x.toFixed(1)}, ${z.toFixed(1)}. Appears on Resume (${summoned.size}/8 summons).`;
+      }
+      return 'No safe nearby ground for the full animal footprint. Move to a clear, dry area.';
+    },
+    refresh(){elapsed=1;lastCell='';queue=[];},
+    update(dt,focus){
     elapsed+=dt;
     const cx=Math.floor(focus.x/CELL),cz=Math.floor(focus.z/CELL),currentCell=`${cx},${cz}`;
     if(elapsed>=.4||currentCell!==lastCell){
@@ -109,10 +151,24 @@ export function createWildlifeStream({scene,surface,actors,assets,definitions,ob
         const key=`${x},${z}`;wanted.add(key);if(!cells.has(key))cells.set(key,plan(x,z));
       }
       for(const key of cells.keys())if(!wanted.has(key))cells.delete(key);
+      const companions=taming?.companions()??[],companionIds=new Set(companions.map(d=>d.id));
+      // Feeding promotes a summon into an expedition identity before distance cleanup.
+      for(const id of companionIds)summoned.delete(id);
+      for(const [id,data] of summoned){
+        const p=active.get(id)?.root.position;
+        if(Math.hypot((p?.x??data.position[0])-focus.x,(p?.z??data.position[2])-focus.z)>=1100){
+          if(active.has(id)){remove(active.get(id));active.delete(id);}summoned.delete(id);
+        }
+      }
       const candidates=[...authored,...habitatAnimals,...[...cells.values()].flat()].filter(d=>Math.hypot(d.position[0]-focus.x,d.position[2]-focus.z)<1100);
       candidates.sort((a,b)=>Math.hypot(a.position[0]-focus.x,a.position[2]-focus.z)-Math.hypot(b.position[0]-focus.x,b.position[2]-focus.z));
-      const selected=candidates.slice(0,MAX_ACTIVE),ids=new Set(selected.map(d=>d.id));
+      const priority=[...companions,...[...summoned.values()].filter(d=>!companionIds.has(d.id))];
+      const unique=new Map(priority.map(d=>[d.id,d]));
+      for(const data of candidates)if(unique.size<MAX_ACTIVE&&!unique.has(data.id))unique.set(data.id,data);
+      const selected=[...unique.values()],ids=new Set(unique.keys());
       for(const [id,a] of active)if(!ids.has(id)){remove(a);active.delete(id);}
+      // Unfed records expire with local plans; at most three fed IDs stay pinned.
+      taming?.retain(new Set([...authored,...habitatAnimals,...[...cells.values()].flat(),...summoned.values()].map(d=>d.id)));
       queue=selected.filter(d=>!active.has(d.id));
     }
     // Spread expensive skeleton cloning over frames.

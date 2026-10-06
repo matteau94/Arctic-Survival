@@ -6,6 +6,8 @@ export const ITEM_DEFINITIONS = Object.freeze(Object.fromEntries([
   { id: 'rope', name: 'Rope', description: 'A coil of climbing rope.', category: 'equipment', unitWeight: 1.5, maxStack: 1 },
   { id: 'matches', name: 'Matches', description: 'A small waterproof box of matches.', category: 'equipment', unitWeight: 0.02, maxStack: 5 },
   { id: 'ice-axe', name: 'Ice axe', description: 'A steel-headed mountaineering ice axe.', category: 'equipment', unitWeight: 0.75, maxStack: 1 },
+  { id: 'handaxe', name: 'Handaxe', description: 'Equip to chop nearby conifers outdoors with left click. Four hits yield 3 Wood; the final hit requires backpack space. Put away before petting.', category: 'equipment', unitWeight: 0.7, maxStack: 1 },
+  { id: 'wood', name: 'Wood', description: 'Collected from felled conifers. Three pieces per tree. Carried material; no crafting use yet.', category: 'material', unitWeight: 0.5, maxStack: 12 },
   { id: 'tent', name: 'Small tent', description: 'Place on dry, gently sloping ground. A bare tent blocks further cold but does not restore warmth. Enter, then place your sleeping bag inside to recover 3 exposure seconds per active game second. Placement commits your tent to this campsite for the expedition; it cannot be picked up or moved.', category: 'camping', unitWeight: 2, maxStack: 1 },
   { id: 'sleeping-bag', name: 'Sleeping bag', description: 'Enter a tent, then place this bag inside to enable warmth recovery in that tent. Bare tents only block cold. Carried bags and bags placed outdoors give no warmth. Placement is permanent for this expedition; the bag cannot be picked up or moved.', category: 'camping', unitWeight: 1.2, maxStack: 1 },
 ].map((definition) => [definition.id, Object.freeze(definition)])));
@@ -18,6 +20,7 @@ const STARTER_ITEMS = [
   ['food', 3], ['water', 2], ['bandages', 3],
   ['rope', 1], ['matches', 1], ['ice-axe', 1],
   ['tent', 1], ['sleeping-bag', 1],
+  ['handaxe', 1],
 ];
 const definitionFor = (id) => typeof id === 'string'
   && Object.prototype.hasOwnProperty.call(ITEM_DEFINITIONS, id)
@@ -83,6 +86,7 @@ function readSavedItems(raw) {
  */
 export function createInventory({ storage } = {}) {
   let items = new Map(STARTER_ITEMS);
+  let heldId = null; // Transient equipment state; never persisted or consumed.
   let placements=[];
   let migrationOverflow=false;
   let saveError = null;
@@ -117,12 +121,14 @@ export function createInventory({ storage } = {}) {
       slots,
       maxSlots: MAX_SLOTS,
       saveError,
+      heldId,
       placements:placements.map(p=>({...p})),
     };
   }
 
   function commit(next, message) {
     items = next;
+    if(heldId&&!(items.get(heldId)>0))heldId=null;
     if(!capacityError(items))migrationOverflow=false;
     if (storage != null) {
       try {
@@ -137,9 +143,13 @@ export function createInventory({ storage } = {}) {
         saveError = 'Could not save inventory; changes are kept in memory only.';
       }
     }
-    // Give every subscriber its own detached view of this exact commit.
+    return notify(saveError ? `${message} ${saveError}` : message);
+  }
+
+  function notify(message) {
+    // Give every subscriber its own detached view, including held state.
     const notifications = Array.from(listeners, (callback) => [callback, snapshot()]);
-    const result = { ok: true, message: saveError ? `${message} ${saveError}` : message };
+    const result = { ok: true, message };
     for (const [callback, state] of notifications) {
       try { callback(state); } catch { /* A subscriber cannot undo a committed edit. */ }
     }
@@ -170,6 +180,18 @@ export function createInventory({ storage } = {}) {
 
   return Object.freeze({
     snapshot,
+    heldId:()=>heldId,
+    hold(id){
+      if(!['food','handaxe'].includes(id)||!(items.get(id)>0))return {ok:false,message:'You must own this item to hold it.'};
+      heldId=id;
+      return notify(`Holding ${definitionFor(id).name}. Still counted in your backpack.`);
+    },
+    putAway(){
+      if(!heldId)return {ok:true,message:'Your hands are already empty.'};
+      const name=definitionFor(heldId).name;
+      heldId=null;
+      return notify(`${name} put away.`);
+    },
     deploy(id,position){
       if(!['tent','sleeping-bag'].includes(id)||!(items.get(id)>0))return {ok:false,message:'This item is not in your backpack.'};
       if(placements.length>=100)return {ok:false,message:'Campsite placement limit reached.'};

@@ -1,5 +1,48 @@
 # Arctic Survival browser game
 
+## Handaxe and wood
+
+Open **E → Handaxe → Equip / Hold**, resume outdoors, face a streamed conifer
+within **1.65 m of its trunk**, and **left click**. Equip replaces held Trail food;
+both items remain in the backpack. Use **Put away** to free your hands for P/petting.
+F/shelter/feed and G/follow/stay retain their existing roles.
+
+Four hits fell a conifer and add **3 Wood**, **0.5 kg each**, stacks of **12**.
+The final hit requires room for the whole reward (weight and stack slots). A
+visible refusal leaves the tree at 3/4 hits so you can make room and retry.
+Wood is carried material only; there is no crafting or axe durability.
+
+The loaded `Human_Attack` clip supplies the swing: 0–0.40 s anticipation,
+0.40–0.54 s strike, impact at 0.54 s, recovery to its loaded duration (currently
+1.30 s). Movement is locked for the swing; the existing mixer advances it once
+per frame. Opening UI, losing focus, shelter entry, spectator mode, death or
+changing held equipment cancels the swing. Cancellation restores full-weight
+idle with a zero-time mixer evaluation and retains the remaining cooldown.
+Reach, facing, resident tree identity and terrain/obstacle/trunk LOS are checked
+again at impact from the player. The target must also be inside the camera
+frustum and pass camera-to-contact LOS at selection and impact. That segment is
+capped at **7.5 m**: the existing 4.5 m camera boom + 2.5 m player LOS limit +
+0.5 m camera aim-height offset. Both segments ignore only the target trunk.
+
+Felled IDs use expedition seed, cell and original candidate index. Up to **512**
+are retained until the expedition ends; reaching the limit refuses further
+chopping rather than evicting IDs and regrowing harvested trees. Up to **64**
+partial damage records are retained; those clear when their render chunk leaves
+the stream. A fall shares the tree geometry/material, tilts for 1.25 s, then
+settles/sinks and disappears at 2 s; at most **4** falls exist. Collision and LOS
+remove the harvested trunk at reward commit. Falling trees are cosmetic.
+
+Source cost bounds: targeting reads at most 9 resident chunks / 72 candidates
+without generating plans; prompt scans run at most once per 0.15 active seconds,
+plus fresh click/impact checks. Player LOS takes at most 14 terrain samples;
+camera LOS takes at most 39, including both endpoints (53 combined). The helper
+has a hard ceiling of 64 terrain reads per segment, uses existing obstacle lists
+and cached local tree queries, and fails closed on unknown cells without
+synchronous generation or scene mesh raycasts. Falling visuals update at most
+4 transforms per active frame.
+Existing streaming caps remain 25 chunks / 200 standing instance slots, four
+plans and one chunk upload per frame. These are source bounds, not measurements.
+
 ## Cold and shelter
 
 Exposure starts at 0 and increases by 1 per active outdoor game second. At 360

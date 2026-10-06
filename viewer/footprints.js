@@ -6,7 +6,7 @@ export function createFootprints(scene, surface, player, terrainMeshes=[]) {
   const snow=createSnowImpressions(THREE,scene,surface,terrainMeshes);
   const point=new THREE.Vector3();
   const contacts=(player.soleSamples||[]).map(sample=>({sample,touching:false,last:new THREE.Vector3(Infinity,Infinity,Infinity)}));
-  return function updateFootprints(){
+  function updateFootprints(){
     let currentMesh=null;
     for(const contact of contacts){
       const sample=contact.sample;
@@ -21,5 +21,9 @@ export function createFootprints(scene, surface, player, terrainMeshes=[]) {
       contact.touching=touching;
     }
     snow.update(player.root.position);
-  };
+  }
+  // Read-only access for runtime decals to avoid existing depressed snow.
+  updateFootprints.sampleDepth=snow.sampleDepth;
+  updateFootprints.reset=()=>{for(const contact of contacts){contact.touching=false;contact.last.set(Infinity,Infinity,Infinity);}};
+  return updateFootprints;
 }

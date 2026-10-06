@@ -187,6 +187,8 @@ export function createWaypoints({ camera, getPlayer, waypoints = [], subscribe =
     // Fan crowded labels out in eight-degree increments, retaining true anchors.
     const focal=height/(2*Math.tan(camera.fov*Math.PI/360));
     const occupied=[],panelRect=panel.getBoundingClientRect();
+    const predator=document.getElementById('bear-status');
+    if(predator&&!predator.hidden)occupied.push(predator.getBoundingClientRect());
     for(const candidate of candidates.sort((a,b)=>a.record.metres-b.record.metres||a.record.order-b.record.order)){
       if(occupied.length>=12)break;
       let placement=null;

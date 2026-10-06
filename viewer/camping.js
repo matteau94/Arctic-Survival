@@ -47,7 +47,7 @@ function campModel(id,preview=false){
   return group;
 }
 
-export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacles,canPlace=()=>true,getInterior=()=>null}){
+export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacles,canPlace=()=>true,getInterior=()=>null,treeOverlap=()=>false}){
   const placed=[];
   const tentListeners=new Set();
   const equippedTents=new Set(); // Updated only when a committed indoor bag is added.
@@ -97,6 +97,7 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
       const playerPosition=player.root.position;
       if(bounds.min.x<playerPosition.x+.4&&bounds.max.x>playerPosition.x-.4&&bounds.min.z<playerPosition.z+.4&&bounds.max.z>playerPosition.z-.4)valid=false;
       for(const existing of placed)if(existing.data.tentIndex===p.tentIndex&&new THREE.Box3().setFromObject(existing.mesh).intersectsBox(bounds))valid=false;
+      if(interior.companionOverlap?.(bounds))valid=false;
       ghost.traverse(o=>{if(o.isMesh)o.material.color.set(valid?0x70e7b0:0xef6464);});
       candidate=p;
       hudHint(hint,'warm',`${valid?'Click · Place bag':'Clear floor needed'} · R ↻ · Esc × · Permanent`,`${valid?'Ready to place sleeping bag.':'Cannot place: clear floor needed away from walls, doorway, player and other equipment.'} Indoor bags restore warmth; bare tents only block cold. Placement is permanent. R rotates; Esc cancels.`);
@@ -116,6 +117,8 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     transform(ghost,p);
     const bounds=new THREE.Box3().setFromObject(ghost);
     if(obstacles.some(b=>b.intersectsBox(bounds)))valid=false;
+    // Includes the canopy and an outdoor approach apron, even in unloaded cells.
+    if(treeOverlap(bounds))valid=false;
     for(const existing of placed){
       if(existing.data.tentIndex!==undefined)continue;
       // A sleeping bag may fit inside a tent; same-type items cannot overlap.
@@ -136,6 +139,8 @@ export function createCamping({scene,surface,inventory,getPlayer,getYaw,obstacle
     hudHint(hint,item==='tent'?'tent':'warm',`${valid?'Click · Place':'Clear ground needed'} · R ↻ · Esc × · Permanent · Still exposed`,`${valid?'Ready to place.':'Cannot place: choose dry, clear, gently sloping ground.'} Bare tents only block cold; indoor sleeping bags restore warmth. Outdoor bags give no warmth. Placement is permanent. R rotates; Esc cancels. Setup, positioning and entry take time: remain exposed until inside.`);
   }
   return {
+    indoorBounds:tentIndex=>placed.filter(p=>p.data.tentIndex===tentIndex).map(p=>new THREE.Box3().setFromObject(p.mesh)),
+    outdoorBounds:()=>placed.filter(p=>p.data.tentIndex===undefined).map(p=>new THREE.Box3().setFromObject(p.mesh)),
     tents:()=>placed.filter(p=>p.data.id==='tent'),
     subscribeTentPlaced(callback){
       tentListeners.add(callback);

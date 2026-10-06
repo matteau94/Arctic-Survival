@@ -10,8 +10,17 @@ files.add('viewer/habitat-density.js');
 files.add('viewer/nearby-settlements.js');
 files.add('viewer/fox-dens.js');
 files.add('viewer/wildlife-stream.js');
+files.add('viewer/survival-commands.js');
 files.add('viewer/world-seed.js');
+files.add('viewer/tree-stream.js');
 files.add('viewer/cold.js');
+files.add('viewer/held-food.js');
+files.add('viewer/held-axe.js');
+files.add('viewer/animal-taming.js');
+files.add('viewer/animal-petting.js');
+files.add('viewer/companion-room.js');
+files.add('viewer/bear-threat.js');
+files.add('viewer/animal-tracks.js');
 const world = JSON.parse(fs.readFileSync(path.join(root, 'viewer/data/world.json'), 'utf8'));
 for (const file of ['inventory.js','inventory-ui.js','inventory.css','camping.js','tent-setup.js','tent-interior.js','tent-door.js']) files.add(`viewer/${file}`);
 

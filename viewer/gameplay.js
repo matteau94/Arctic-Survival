@@ -1,10 +1,82 @@
 import * as THREE from 'three';
 import { TerrainSurface } from './terrain.mjs';
+import { registerBear, unregisterBear, bearIntent, bearCanStep } from './bear-threat.js';
 export const surface = new TerrainSurface();
+let vegetation=null;
+export function setVegetationCollision(value){vegetation=value;}
 let campBlocks=()=>false;
+// check(x, z, worldY?): omitted height preserves the human collision default.
 export function setCampCollision(check){campBlocks=check;}
+let taming=null;
+export function setAnimalTaming(value){taming=value;}
+const sightRay=new THREE.Ray(),sightHit=new THREE.Vector3();
+let campSightBounds=[];
+export function setAnimalCampBounds(boxes){campSightBounds=boxes;}
+export function animalLineOfSight(from,to,campMeshes=null){
+  const distance=from.distanceTo(to);
+  if(distance>40)return false;
+  sightRay.origin.copy(from);sightRay.origin.y+=.65;
+  sightRay.direction.copy(to).sub(from).normalize();
+  if(vegetation?.rayDistance(sightRay,distance)<distance)return false;
+  for(const boxes of [obstacles,animalObstacles,...(campMeshes?[]:[campSightBounds])])for(const box of boxes){
+    if(box.containsPoint(sightRay.origin))return false;
+    if(sightRay.intersectBox(box,sightHit)&&sightHit.distanceTo(sightRay.origin)<=distance)return false;
+  }
+  // Tent entry happens with the door open. Its solid AABB would occlude
+  // the doorway itself; intersect the actual canvas/door for this check.
+  if(campMeshes){
+    const raycaster=new THREE.Raycaster(sightRay.origin,sightRay.direction,0,distance);
+    const visibleMeshes=[];
+    for(const root of campMeshes){
+      let visible=true;
+      for(let parent=root.parent;parent;parent=parent.parent)if(!parent.visible){visible=false;break;}
+      if(!visible)continue;
+      root.traverseVisible(mesh=>{
+        if(!mesh.isMesh)return;
+        const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+        if(materials.some(material=>material?.visible))visibleMeshes.push(mesh);
+      });
+    }
+    // Raycaster does not filter visibility, including individual material
+    // groups. Do not recursively reintroduce hidden descendants here.
+    if(raycaster.intersectObjects(visibleMeshes,false).some(hit=>{
+      const material=Array.isArray(hit.object.material)?hit.object.material[hit.face?.materialIndex]:hit.object.material;
+      return material?.visible;
+    }))return false;
+  }
+  const samples=Math.min(64,Math.max(1,Math.ceil(distance/.2)));
+  for(let i=1;i<=samples;i++){
+    const t=i/samples,x=from.x+(to.x-from.x)*t,z=from.z+(to.z-from.z)*t;
+    const h=surface.height(x,z),y=from.y+(to.y-from.y)*t+.65;
+    if(!Number.isFinite(h)||h>y)return false;
+  }
+  return true;
+}
 let player;
-const wildlife = [], fish = [], obstacles = [];
+// Bounded tool/camera segment. The camera ceiling is 4.5 m boom + 2.5 m
+// tool segment + .5 m aim-height offset. Ignore only the target trunk;
+// unknown tree cells fail closed; terrain/settlement/habitat/tent bounds apply.
+export function choppingLineOfSight(from,to,targetId,maxDistance=2.5){
+  const distance=from.distanceTo(to);
+  if(!Number.isFinite(maxDistance)||maxDistance<=0||maxDistance>7.5||
+    !Number.isFinite(distance)||distance>maxDistance||distance<=0)return false;
+  sightRay.origin.copy(from);sightRay.direction.copy(to).sub(from).normalize();
+  if(vegetation?.rayDistance(sightRay,distance,0,targetId)<distance)return false;
+  for(const boxes of [obstacles,animalObstacles,campSightBounds])for(const box of boxes){
+    if(box.containsPoint(from))return false;
+    if(sightRay.intersectBox(box,sightHit)&&sightHit.distanceTo(from)<=distance)return false;
+  }
+  // Include both endpoints (including a camera inside terrain), <=64 reads.
+  const segments=Math.min(63,Math.ceil(distance/.2));
+  for(let i=0;i<=segments;i++){
+    sightRay.at(distance*i/segments,sightHit);
+    const h=surface.height(sightHit.x,sightHit.z);
+    if(!Number.isFinite(h)||h>=sightHit.y)return false;
+  }
+  return true;
+}
+const wildlife = [], fish = [], obstacles = [], animalObstacles=[];
+export function addAnimalObstacles(boxes){animalObstacles.push(...boxes);}
 export const WILDLIFE_SIMULATION_DISTANCE = 1000;
 const forward = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3(), away = new THREE.Vector3();
 const animationChoices = {idle:['Idle'], walk:['Walk'], run:['Run','Walk'], crouchIdle:['CrouchIdle'], crouchWalk:['CrouchWalk'], swim:['SwimCalm','Swim']};
@@ -13,21 +85,37 @@ const WALK_SPEED = 5 * 0.44704;
 const SPRINT_SPEED = 14 * 0.44704;
 // In-place clips were authored at these ground speeds (human_anim_locomotion.py).
 const HUMAN_CLIP_SPEED = {walk:1.3, run:4.5, crouchWalk:.9};
+// gaits.py: planted paw travel S / stance duty = metres per full cycle.
+// Exported clips omit the author's speed_m_per_s custom property.
+const FOX_CYCLE_DISTANCE = {ArcticFox_Walk:.20/.66, ArcticFox_Gallop:.23/.30};
+const FOX_ANIMATION_CHOICES = {...animationChoices, run:['Gallop','Walk']};
+const CAUTIOUS_ANIMATION_CHOICES = {slowWalk:['Walk']};
+// penguin_anim.py: .16 local metres/cycle, embedded rig scale .32, 48/60 s.
+const PENGUIN_WALK_CYCLE_DISTANCE=.16*.32;
+const FLIGHT_MEMORY=1.25;
 const STANDING_TURN_RATE = 2.8;
 const MOVING_TURN_RATE = 9;
 const TURN_THRESHOLD = .025;
 const solePoint = new THREE.Vector3();
 const profiles = {
-  fox: {speed:3, radius:70, alert:35}, penguin:{speed:1.1,radius:35,alert:22},
+  fox: {speed:FOX_CYCLE_DISTANCE.ArcticFox_Walk/(26/30), fleeSpeed:FOX_CYCLE_DISTANCE.ArcticFox_Gallop/(11/30), radius:70, alert:35}, penguin:{speed:1.1,radius:35,alert:22},
   bear:{speed:2,radius:100,alert:55}, fish:{speed:3,radius:100,aquatic:true},
   orca:{speed:7,radius:400,aquatic:true}
 };
-function animate(a, state, speed=0) {
+export function animate(a, state, speed=0) {
   const clip = a.animationClips[state];
   if (!clip) return;
   if(a.type==='human') {
     const authoredSpeed=HUMAN_CLIP_SPEED[state];
     a.mixer.clipAction(clip).setEffectiveTimeScale(authoredSpeed&&speed>0?speed/authoredSpeed:1);
+  }
+  if(a.type==='fox') {
+    const cycleDistance=FOX_CYCLE_DISTANCE[clip.name]*Math.abs(a.root.scale.x);
+    a.mixer.clipAction(clip).setEffectiveTimeScale(cycleDistance>0?speed*clip.duration/cycleDistance:1);
+  }
+  if(a.type==='penguin') {
+    const cycleDistance=PENGUIN_WALK_CYCLE_DISTANCE*Math.abs(a.root.scale.x);
+    a.mixer.clipAction(clip).setEffectiveTimeScale(state==='slowWalk'&&cycleDistance>0?speed*clip.duration/cycleDistance:1);
   }
   if(a.clip===clip.name) return;
   const old = a.action;
@@ -41,7 +129,8 @@ export function register(a) {
     obstacles.push(new THREE.Box3().setFromObject(a.root)); return;
   } else {wildlife.push(a);if(a.type==='fish') fish.push(a);}
   a.animationClips = {};
-  for (const [state,names] of Object.entries(animationChoices)) {
+  const choices=a.type==='fox'?FOX_ANIMATION_CHOICES:animationChoices;
+  for (const [state,names] of Object.entries(['fox','penguin'].includes(a.type)?{...choices,...CAUTIOUS_ANIMATION_CHOICES}:choices)) {
     a.animationClips[state] = names.map(name=>a.clips.find(c=>c.name.toLowerCase()===name.toLowerCase()||c.name.toLowerCase().endsWith('_'+name.toLowerCase()))).find(Boolean);
   }
   a.home=a.root.position.clone(); a.destination=a.home.clone(); a.think=0;
@@ -49,9 +138,11 @@ export function register(a) {
   const ground=surface.height(a.root.position.x,a.root.position.z);
   a.footOffset=a.type==='human'||profiles[a.type]?.aquatic||ground===null?0:Math.max(0,a.root.position.y-ground);
   a.state='Roaming';
+  registerBear(a);
   if(a.type==='human') {a.turnStepTime=0;prepareFootContact(a);}
 }
 export function unregister(a){
+  unregisterBear(a);
   for(const list of [wildlife,fish]){const index=list.indexOf(a);if(index>=0)list.splice(index,1);}
 }
 function prepareFootContact(a) {
@@ -118,14 +209,19 @@ export function updateFootContact(a,dt) {
 }
 function step(a, dx, dz) {
   const p=a.root.position, x=p.x+dx,z=p.z+dz;
+  if(a.type!=='human'&&taming?.blocksOutdoor?.(x,z,a))return false;
+  if(a.type==='bear'&&!bearCanStep(a,x,z,Math.atan2(dx,dz)))return false;
   if(a.type==='human'&&campBlocks(x,z))return false;
   const h=surface.height(x,z), aquatic=profiles[a.type]?.aquatic;
   if (h===null) return false;
+  if(['fox','penguin'].includes(a.type)&&campBlocks(x,z,h))return false;
   if (aquatic) {
     if (h>p.y-2) return false;
   } else {
     if (h<0 || Math.abs(h-p.y+a.footOffset)>Math.hypot(dx,dz)*1.2+1) return false;
+    if(vegetation?.blocksMove(p,x,z,.5))return false;
     for (const b of obstacles) if(x>b.min.x-.5&&x<b.max.x+.5&&z>b.min.z-.5&&z<b.max.z+.5&&p.y<b.max.y) return false;
+    if(['fox','penguin'].includes(a.type))for(const b of animalObstacles)if(x>b.min.x-.5&&x<b.max.x+.5&&z>b.min.z-.5&&z<b.max.z+.5&&p.y<b.max.y)return false;
     p.y=h+a.footOffset;
   }
   p.x=x;p.z=z;
@@ -134,6 +230,7 @@ function step(a, dx, dz) {
 }
 export function updateGame(dt, keys, camera) {
   if (!player) return;
+  if(player.petting||player.chopping)return;
   camera.getWorldDirection(forward);forward.y=0;
   if (forward.lengthSq()<.001) forward.set(0,0,-1);
   forward.normalize();right.crossVectors(forward,camera.up).normalize();move.set(0,0,0);
@@ -162,12 +259,12 @@ export function updateGame(dt, keys, camera) {
   const animationSpeed=moved?(crouch?.7:run?SPRINT_SPEED:WALK_SPEED):turning?(crouch?.75:1.3):0;
   animate(player,crouch?(walking?'crouchWalk':'crouchIdle'):moved&&run?'run':walking?'walk':'idle',animationSpeed);
   player.state=moved?(run?'Running':crouch?'Crouching':'Walking'):turning?'Turning':'Idle';
-  updateWildlife(dt,player.root.position,player.root.position);
 }
 
 // Spectators activate nearby wildlife without moving or alerting the player.
 export function updateWildlife(dt,focus,threat=null) {
   for (const a of wildlife) {
+    if(a.companionRoom)continue;
     const profile=profiles[a.type], p=a.root.position;
     const distanceSquared=(p.x-focus.x)**2+(p.z-focus.z)**2;
     // Include visible model bounds at the edge of the simulation radius.
@@ -175,12 +272,64 @@ export function updateWildlife(dt,focus,threat=null) {
     const threatDistanceSquared=threat?p.distanceToSquared(threat):Infinity;
     a.think-=dt;
     let fast=false;
-    if (!profile.aquatic && threatDistanceSquared<profile.alert*profile.alert) {
-      away.copy(p).sub(threat);away.y=0;
-      if (away.lengthSq()<.001) away.set(1,0,0);
-      a.destination.copy(p).addScaledVector(away.normalize(),a.type==='bear'?-10:20);
-      a.state=a.type==='bear'?'Approaching':'Fleeing';fast=true;
-      if(a.type==='bear'&&threatDistanceSquared<9) a.destination.copy(p);
+    const companion=taming?.intent(a,threat);
+    const timid=a.type==='fox'||a.type==='penguin';
+    // Intent is recomputed from current keys/food. Never leave a pursuit
+    // destination active during the ordinary 3–8 second roaming think delay.
+    if(timid){
+      a.flightRemaining=Math.max(0,(a.flightRemaining??0)-dt);
+      if(a.cautious&&!companion?.cautious){
+        a.destination.copy(p);a.think=0;
+        // Stowing invalidates LOS. Escape from the last observed position
+        // even if this frame's sight budget cannot refresh this animal.
+        if(!companion&&threat&&a.flightRemaining>0&&a.cautiousThreat){
+          away.copy(p).sub(a.cautiousThreat);away.y=0;
+          if(away.lengthSq()<.001)away.set(1,0,0);
+          a.destination.copy(p).addScaledVector(away.normalize(),20);
+        }
+      }
+      a.cautious=!!companion?.cautious;
+      if(a.cautious){
+        if(!a.cautiousThreat)a.cautiousThreat=threat.clone();
+        else a.cautiousThreat.copy(threat);
+        a.flightRemaining=FLIGHT_MEMORY;
+      }else if(companion||!threat)a.flightRemaining=0;
+    }
+    const detected=timid&&!companion&&threat&&taming?.detects(a);
+    const intent=a.type==='bear'?bearIntent(a,dt,threat):null;
+    if(companion){
+      a.state=companion.state;
+      if(companion.stop){a.destination.copy(p);animate(a,'idle');continue;}
+      a.destination.copy(companion.target);
+      fast=!companion.cautious&&a.type==='fox'&&threatDistanceSquared>25;
+    } else if(intent){
+      a.state=intent.state;
+      if(intent.stop){a.destination.copy(p);animate(a,'idle');continue;}
+      if(intent.charge){
+        // A committed burst of the existing gallop; no steering after windup.
+        const distance=intent.speed*intent.chargeDt;
+        const steps=Math.max(1,Math.ceil(distance/.1)),stride=distance/steps;
+        a.bear.advanced=distance>0;
+        // At most four terrain/obstacle checks, each no more than 10 cm apart.
+        for(let i=0;i<steps;i++){
+          if(!step(a,Math.sin(intent.yaw)*stride,Math.cos(intent.yaw)*stride)){
+            a.bear.advanced=false;break;
+          }
+        }
+        if(!a.bear.advanced){a.bear.phase='recovery';a.bear.age=0;a.state='Recovering';}
+        animate(a,a.bear.advanced?'run':'idle');continue;
+      }
+      a.destination.copy(threat);fast=true;
+    } else if(timid&&threat&&(detected||a.flightRemaining>0)) {
+      if(detected){
+        away.copy(p).sub(threat);away.y=0;
+        if(away.lengthSq()<.001)away.set(1,0,0);
+        a.destination.copy(p).addScaledVector(away.normalize(),20);
+        a.flightRemaining=FLIGHT_MEMORY;
+      }
+      // Once the animal turns away, retain only the last escape endpoint.
+      a.state='Fleeing';fast=true;
+      a.think=0;
     } else if(a.think<=0) {
       a.think=3+Math.random()*5;a.state='Roaming';
       let prey=null,nearestSquared=1500*1500;
@@ -192,10 +341,13 @@ export function updateWildlife(dt,focus,threat=null) {
       else {const angle=Math.random()*Math.PI*2,r=Math.random()*profile.radius;a.destination.set(a.home.x+Math.sin(angle)*r,a.home.y,a.home.z+Math.cos(angle)*r);}
     }
     move.copy(a.destination).sub(p);move.y=0;
-    const travel=Math.min(move.length(),profile.speed*(fast?2:1)*dt);
+    const cautious=companion?.cautious;
+    const walkSpeed=cautious&&a.type==='penguin'?Math.min(profile.speed,PENGUIN_WALK_CYCLE_DISTANCE*Math.abs(a.root.scale.x)/(48/60)):profile.speed;
+    const speed=cautious?walkSpeed*companion.speedScale:fast?(profile.fleeSpeed??profile.speed*2):profile.speed;
+    const travel=Math.min(Math.max(0,move.length()-(cautious?companion.stopDistance:0)),speed*dt);
     move.normalize().multiplyScalar(travel);
-    const moved=travel>.001&&step(a,move.x,move.z);
+    const moved=travel>(cautious?.000001:.001)&&step(a,move.x,move.z);
     if(!moved){a.think=0;a.state='Resting';}
-    animate(a,profile.aquatic?'swim':moved?(fast?'run':'walk'):'idle');
+    animate(a,profile.aquatic?'swim':moved?(cautious?'slowWalk':fast?'run':'walk'):'idle',moved&&dt>0?travel/dt:0);
   }
 }

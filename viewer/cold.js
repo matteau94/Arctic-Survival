@@ -15,7 +15,10 @@ export function hudHint(node,icon,caption,detail=caption){
 }
 export function renderControls(node,spectator=false){
  if(node.dataset.mode===String(spectator))return;node.dataset.mode=String(spectator);node.replaceChildren();
- for(const [icon,key,detail] of [['move','WASD','WASD or arrows: move'],['run','Shift',spectator?'Hold Shift: fly faster':'Hold Shift: run'],[spectator?'move':'crouch',spectator?'Space/C':'C',spectator?'Space rises; C descends':'Hold C: crouch'],['mouse','','Mouse: look and turn'],[spectator?'map':'pack',spectator?'T':'E',spectator?'T: teleport destinations':'E: inventory'],['pause','Esc','Esc: pause and release cursor']]){
+ for(const [icon,key,detail] of [['move','WASD','WASD or arrows: move'],['run','Shift',spectator?'Hold Shift: fly faster':'Hold Shift: run'],[spectator?'move':'crouch',spectator?'Space/C':'C',spectator?'Space rises; C descends':'Hold C: crouch'],['mouse','','Mouse: look and turn'],[spectator?'map':'pack',spectator?'T':'E',spectator?'T: teleport destinations':'E: inventory'],...(!spectator?[
+  ['mouse','LMB','Left click: swing equipped Handaxe near a conifer; four hits yield 3 Wood. E → Handaxe → Equip / Hold or Put away.'],
+  ['enter','F','F: shelter / feed with held Trail food'],['enter','G','G: companion Follow / Stay with food stowed'],['enter','P','P: pet up close with empty hands'],
+ ]:[]),['pause','Esc','Esc: pause and release cursor']]){
   const hint=document.createElement('span');hudHint(hint,icon,key,detail);node.append(hint);
  }
 }
@@ -40,6 +43,15 @@ export function createCold({ onDeath }) {
   restart.addEventListener('click', () => { if (dead) window.location.reload(); });
   end.addEventListener('cancel', event => event.preventDefault());
   end.append(reason, restart);document.body.append(end);
+  function endExpedition(cause='cold') {
+    if(dead)return;
+    dead=true;
+    const bear=cause==='bear';
+    end.setAttribute('aria-label',bear?'Expedition ended by polar bear':'Expedition ended from cold');
+    reason.textContent=bear?'Expedition ended: struck by a charging polar bear. Move sideways during its windup, then escape or enter shelter.':'Expedition ended: cold exposure reached 360 active game seconds. Enter a tent or fox den before exposure reaches the limit.';
+    hud.textContent=bear?'Expedition ended by polar bear': 'Expedition ended from cold · Exposure 360 / 360 sec · 0 seconds remaining.';
+    onDeath(cause);end.showModal();restart.focus();
+  }
   function paint(now, active, shelter, suspended) {
     const stateKey = `${active}:${shelter}:${active ? '' : suspended}`;
     if (stateKey === lastState && now - lastPaint < 1000) return;
@@ -64,6 +76,7 @@ export function createCold({ onDeath }) {
   }
   return {
     dead: () => dead,
+    endExpedition,
     // Input transitions discard inactive wall time, including tab suspension.
     resetClock() { previousActive = false; },
     update(now, dt, active, shelter, suspended = 'Paused') {
@@ -73,10 +86,7 @@ export function createCold({ onDeath }) {
       previousActive = active;
       exposure = Math.max(0, Math.min(limit, exposure + elapsed * (shelter === 'equipped-tent' ? -3 : shelter === 'tent' ? 0 : shelter === 'den' ? -1 : 1)));
       if (exposure >= limit) {
-        dead = true;
-        hud.textContent = 'Expedition ended from cold · Exposure 360 / 360 sec · 0 seconds remaining.';
-        onDeath(); // Explicit, one-shot terminal event; bypass HUD throttling.
-        end.showModal();restart.focus();return;
+        endExpedition('cold');return;
       }
       paint(now, active, shelter, suspended);
     },

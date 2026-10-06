@@ -7,6 +7,11 @@
   font: bold 12px/1.35 ui-monospace, Consolas, monospace;
   text-shadow: 2px 2px #151719;
 }
+
+/* The top band is reserved by waypoint placement; context prompts stay below. */
+#bear-status{position:fixed;top:134px;left:50%;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:6px;max-width:calc(100vw - 32px);padding:5px 8px;border:1px solid #aebdc3;border-radius:5px;background:#07141eed;color:#eef5f5;font:12px/1.3 ui-monospace,Consolas,monospace;pointer-events:none}
+#bear-status[hidden]{display:none}
+#bear-status svg{width:21px;height:21px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .waypoints *, .waypoints *::before, .waypoints *::after { box-sizing: border-box; }
 .waypoints[hidden], .waypoints [hidden] { display: none !important; }
 .waypoints-hud { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }

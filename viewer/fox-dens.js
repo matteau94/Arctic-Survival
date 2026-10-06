@@ -109,6 +109,7 @@ export function createFoxDens({camera,player,keys,locations,getYaw,setYaw,getPit
   }
   return {
     active:()=>!!room,scene:()=>room,
+    canInteract(){refresh();return !!room||!!nearby;},
     interact(){refresh();if(room){if(position.z<=-.9)return true;clear();setYaw(homeYaw);setPitch?.(homePitch);keys.clear();prompt.hidden=true;return true;}if(!nearby)return false;homeYaw=getYaw();homePitch=getPitch();denName=nearby.name||'Fox den';build(nearby.id??nearby.position.join(','));keys.clear();return true;},
     update(dt,running){
       refresh();prompt.hidden=!running||(!room&&!nearby);
